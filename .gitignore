@@ -1,0 +1,8 @@
+.env
+
+vnev/
+
+__pycache__/
+*.py[cod]
+
+unused/

@@ -1,0 +1,632 @@
+[
+  {
+    "table_id": "balance_sheet",
+    "pdf_page": 86,
+    "document_page": 85,
+    "title": "Consolidated Balance Sheets",
+    "units": "Amounts in thousands, except par value amounts",
+    "columns": [
+      "2024",
+      "2023"
+    ],
+    "rows": [
+      {
+        "label": "Cash and cash equivalents",
+        "2024": 785791,
+        "2023": 747610
+      },
+      {
+        "label": "Short-term investments",
+        "2024": 91854,
+        "2023": null
+      },
+      {
+        "label": "Accounts receivable",
+        "2024": 128923,
+        "2023": 88975
+      },
+      {
+        "label": "Deferred cost of revenues",
+        "2024": 80162,
+        "2023": 53931
+      },
+      {
+        "label": "Prepaid expenses and other current assets",
+        "2024": 14858,
+        "2023": 7282
+      },
+      {
+        "label": "Total current assets",
+        "2024": 1101588,
+        "2023": 897798
+      },
+      {
+        "label": "Operating lease right-of-use assets",
+        "2024": 47495,
+        "2023": 19103
+      },
+      {
+        "label": "Intangible assets, net",
+        "2024": 19899,
+        "2023": 15995
+      },
+      {
+        "label": "Long-term investments",
+        "2024": 98292,
+        "2023": null
+      },
+      {
+        "label": "Property and equipment, net",
+        "2024": 18943,
+        "2023": 11792
+      },
+      {
+        "label": "Goodwill",
+        "2024": 10538,
+        "2023": 4050
+      },
+      {
+        "label": "Restricted cash",
+        "2024": 2735,
+        "2023": 2735
+      },
+      {
+        "label": "Deferred tax assets, net",
+        "2024": 675,
+        "2023": 766
+      },
+      {
+        "label": "Other assets",
+        "2024": 1563,
+        "2023": 1718
+      },
+      {
+        "label": "Total assets",
+        "2024": 1301728,
+        "2023": 953957
+      },
+      {
+        "label": "Deferred revenues",
+        "2024": 372884,
+        "2023": 249192
+      },
+      {
+        "label": "Accounts payable",
+        "2024": 6381,
+        "2023": 2447
+      },
+      {
+        "label": "Income tax payable",
+        "2024": 6591,
+        "2023": 792
+      },
+      {
+        "label": "Accrued expenses and other current liabilities",
+        "2024": 36375,
+        "2023": 24931
+      },
+      {
+        "label": "Total current liabilities",
+        "2024": 422231,
+        "2023": 277362
+      },
+      {
+        "label": "Long-term obligation under operating leases",
+        "2024": 54656,
+        "2023": 21094
+      },
+      {
+        "label": "Deferred tax liabilities, net",
+        "2024": 291,
+        "2023": null
+      },
+      {
+        "label": "Total liabilities",
+        "2024": 477178,
+        "2023": 298456
+      },
+      {
+        "label": "Additional paid-in capital",
+        "2024": 950393,
+        "2023": 869918
+      },
+      {
+        "label": "Accumulated deficit",
+        "2024": -125847,
+        "2023": -214421
+      },
+      {
+        "label": "Total stockholders' equity",
+        "2024": 824550,
+        "2023": 655501
+      },
+      {
+        "label": "Total liabilities and stockholders' equity",
+        "2024": 1301728,
+        "2023": 953957
+      }
+    ]
+  },
+  {
+    "table_id": "income_statement",
+    "pdf_page": 87,
+    "document_page": 86,
+    "title": "Consolidated Statements of Operations and Comprehensive Income (Loss)",
+    "units": "Amounts in thousands",
+    "columns": [
+      "2024",
+      "2023",
+      "2022"
+    ],
+    "rows": [
+      {
+        "label": "Revenues",
+        "2024": 748024,
+        "2023": 531109,
+        "2022": 369495
+      },
+      {
+        "label": "Cost of revenues",
+        "2024": 203645,
+        "2023": 142105,
+        "2022": 99431
+      },
+      {
+        "label": "Gross profit",
+        "2024": 544379,
+        "2023": 389004,
+        "2022": 270064
+      },
+      {
+        "label": "Research and development",
+        "2024": 235298,
+        "2023": 194352,
+        "2022": 150444
+      },
+      {
+        "label": "Sales and marketing",
+        "2024": 90494,
+        "2023": 75788,
+        "2022": 66967
+      },
+      {
+        "label": "General and administrative",
+        "2024": 155992,
+        "2023": 132123,
+        "2022": 117848
+      },
+      {
+        "label": "Total operating expenses",
+        "2024": 481784,
+        "2023": 402263,
+        "2022": 335259
+      },
+      {
+        "label": "Income (loss) from operations",
+        "2024": 62595,
+        "2023": -13259,
+        "2022": -65195
+      },
+      {
+        "label": "Other income",
+        "2024": 1267,
+        "2023": 590,
+        "2022": 131
+      },
+      {
+        "label": "Other expense",
+        "2024": -4253,
+        "2023": -645,
+        "2022": -807
+      },
+      {
+        "label": "Other (expense) income, net",
+        "2024": -2986,
+        "2023": -55,
+        "2022": -676
+      },
+      {
+        "label": "Income (loss) before interest income and income taxes",
+        "2024": 59609,
+        "2023": -13314,
+        "2022": -65871
+      },
+      {
+        "label": "Interest income",
+        "2024": 42697,
+        "2023": 31091,
+        "2022": 7235
+      },
+      {
+        "label": "Income (loss) before income taxes",
+        "2024": 102306,
+        "2023": 17777,
+        "2022": -58636
+      },
+      {
+        "label": "Provision for income taxes",
+        "2024": 13732,
+        "2023": 1710,
+        "2022": 938
+      },
+      {
+        "label": "Net income (loss) and comprehensive income (loss)",
+        "2024": 88574,
+        "2023": 16067,
+        "2022": -59574
+      },
+      {
+        "label": "Net income (loss) per share attributable to Class A and Class B common stockholders, basic",
+        "2024": 2.04,
+        "2023": 0.39,
+        "2022": -1.51
+      },
+      {
+        "label": "Net income (loss) per share attributable to Class A and Class B common stockholders, diluted",
+        "2024": 1.88,
+        "2023": 0.35,
+        "2022": -1.51
+      }
+    ]
+  },
+  {
+    "table_id": "stockholders_equity",
+    "pdf_page": 88,
+    "document_page": 87,
+    "title": "Consolidated Statements of Stockholders’ Equity",
+    "units": "Amounts in thousands",
+    "columns": [
+      "Common Stock Shares",
+      "Common Stock Amount",
+      "Additional Paid-In Capital",
+      "Accumulated Deficit",
+      "Total"
+    ],
+    "rows": [
+      {
+        "label": "BALANCE—January 1, 2022",
+        "common_stock_shares": 38272,
+        "common_stock_amount": 4,
+        "additional_paid_in_capital": 683966,
+        "accumulated_deficit": -170914,
+        "total": 513056
+      },
+      {
+        "label": "Stock-based compensation expense",
+        "common_stock_shares": null,
+        "common_stock_amount": null,
+        "additional_paid_in_capital": 73820,
+        "accumulated_deficit": null,
+        "total": 73820
+      },
+      {
+        "label": "Stock options exercised",
+        "common_stock_shares": 1739,
+        "common_stock_amount": null,
+        "additional_paid_in_capital": 14776,
+        "accumulated_deficit": null,
+        "total": 14776
+      },
+      {
+        "label": "Release of restricted stock units",
+        "common_stock_shares": 350,
+        "common_stock_amount": null,
+        "additional_paid_in_capital": null,
+        "accumulated_deficit": null,
+        "total": null
+      },
+      {
+        "label": "Net loss",
+        "common_stock_shares": null,
+        "common_stock_amount": null,
+        "additional_paid_in_capital": null,
+        "accumulated_deficit": -59574,
+        "total": -59574
+      },
+      {
+        "label": "BALANCE—December 31, 2022",
+        "common_stock_shares": 40361,
+        "common_stock_amount": 4,
+        "additional_paid_in_capital": 772562,
+        "accumulated_deficit": -230488,
+        "total": 542078
+      },
+      {
+        "label": "BALANCE—January 1, 2023",
+        "common_stock_shares": 40361,
+        "common_stock_amount": 4,
+        "additional_paid_in_capital": 772562,
+        "accumulated_deficit": -230488,
+        "total": 542078
+      },
+      {
+        "label": "Release of performance stock units",
+        "common_stock_shares": 180,
+        "common_stock_amount": null,
+        "additional_paid_in_capital": null,
+        "accumulated_deficit": null,
+        "total": null
+      },
+      {
+        "label": "Taxes paid related to net-share settlement of share-based compensation awards",
+        "common_stock_shares": -84,
+        "common_stock_amount": null,
+        "additional_paid_in_capital": -11482,
+        "accumulated_deficit": null,
+        "total": -11482
+      },
+      {
+        "label": "BALANCE—December 31, 2023",
+        "common_stock_shares": 42526,
+        "common_stock_amount": 4,
+        "additional_paid_in_capital": 869918,
+        "accumulated_deficit": -214421,
+        "total": 655501
+      },
+      {
+        "label": "BALANCE—January 1, 2024",
+        "common_stock_shares": 42526,
+        "common_stock_amount": 4,
+        "additional_paid_in_capital": 869918,
+        "accumulated_deficit": -214421,
+        "total": 655501
+      },
+      {
+        "label": "BALANCE—December 31, 2024",
+        "common_stock_shares": 44936,
+        "common_stock_amount": 4,
+        "additional_paid_in_capital": 950393,
+        "accumulated_deficit": -125847,
+        "total": 824550
+      },
+      {
+        "label": "Net income",
+        "common_stock_shares": null,
+        "common_stock_amount": null,
+        "additional_paid_in_capital": null,
+        "accumulated_deficit": 16067,
+        "total": 16067
+      },
+      {
+        "label": "Release of restricted stock units",
+        "common_stock_shares": 350,
+        "common_stock_amount": null,
+        "additional_paid_in_capital": null,
+        "accumulated_deficit": null,
+        "total": null
+      }
+    ]
+  },
+  {
+    "table_id": "cash_flow_statement",
+    "pdf_page": 89,
+    "document_page": 88,
+    "title": "Consolidated Statements of Cash Flows",
+    "units": "Amounts in thousands",
+    "columns": [
+      "2024",
+      "2023",
+      "2022"
+    ],
+    "rows": [
+      {
+        "label": "Net income (loss)",
+        "2024": 88574,
+        "2023": 16067,
+        "2022": -59574
+      },
+      {
+        "label": "Depreciation and amortization",
+        "2024": 10854,
+        "2023": 7095,
+        "2022": 4870
+      },
+      {
+        "label": "Stock-based compensation expense",
+        "2024": 110477,
+        "2023": 95221,
+        "2022": 73820
+      },
+      {
+        "label": "Accretion on marketable securities, net",
+        "2024": -551,
+        "2023": null,
+        "2022": null
+      },
+      {
+        "label": "Gain on sale of capitalized software",
+        "2024": null,
+        "2023": -100,
+        "2022": null
+      },
+      {
+        "label": "Loss on disposal of leasehold improvements",
+        "2024": null,
+        "2023": 433,
+        "2022": null
+      },
+      {
+        "label": "Impairment of capitalized software",
+        "2024": 238,
+        "2023": null,
+        "2022": null
+      },
+      {
+        "label": "Deferred revenue",
+        "2024": 123692,
+        "2023": 91642,
+        "2022": 59283
+      },
+      {
+        "label": "Accounts receivable",
+        "2024": -39917,
+        "2023": -42247,
+        "2022": -13565
+      },
+      {
+        "label": "Deferred cost of revenues",
+        "2024": -26231,
+        "2023": -18890,
+        "2022": -10822
+      },
+      {
+        "label": "Prepaid expenses and other current assets",
+        "2024": -7570,
+        "2023": -48,
+        "2022": -1415
+      },
+      {
+        "label": "Accounts payable",
+        "2024": 3934,
+        "2023": 1261,
+        "2022": -6655
+      },
+      {
+        "label": "Accrued expenses and other current liabilities",
+        "2024": 16850,
+        "2023": 3444,
+        "2022": 8720
+      },
+      {
+        "label": "Noncurrent assets and liabilities",
+        "2024": 5163,
+        "2023": -264,
+        "2022": -1006
+      },
+      {
+        "label": "Net cash provided by operating activities",
+        "2024": 285513,
+        "2023": 153614,
+        "2022": 53656
+      },
+      {
+        "label": "Purchases of investments",
+        "2024": -193300,
+        "2023": null,
+        "2022": null
+      },
+      {
+        "label": "Maturities of investments",
+        "2024": 3705,
+        "2023": null,
+        "2022": null
+      },
+      {
+        "label": "Capitalized software expense and purchases of intangible assets",
+        "2024": -9024,
+        "2023": -10493,
+        "2022": -4562
+      },
+      {
+        "label": "Purchase of property and equipment",
+        "2024": -12116,
+        "2023": -3191,
+        "2022": -5562
+      },
+      {
+        "label": "Proceeds from sale of capitalized software",
+        "2024": null,
+        "2023": 100,
+        "2022": null
+      },
+      {
+        "label": "Acquisitions of companies, net of $5 cash acquired",
+        "2024": -6595,
+        "2023": null,
+        "2022": -4050
+      },
+      {
+        "label": "Net cash used for investing activities",
+        "2024": -217330,
+        "2023": -13584,
+        "2022": -14174
+      },
+      {
+        "label": "Proceeds from exercise of stock options",
+        "2024": 19356,
+        "2023": 13617,
+        "2022": 14776
+      },
+      {
+        "label": "Taxes paid related to net-share settlement of share-based compensation awards",
+        "2024": -49358,
+        "2023": -11482,
+        "2022": null
+      },
+      {
+        "label": "Net cash (used for) provided by financing activities",
+        "2024": -30002,
+        "2023": 2135,
+        "2022": 14776
+      },
+      {
+        "label": "Net increase in cash, cash equivalents and restricted cash",
+        "2024": 38181,
+        "2023": 142165,
+        "2022": 54258
+      },
+      {
+        "label": "Cash, cash equivalents and restricted cash - Beginning of period",
+        "2024": 750345,
+        "2023": 608180,
+        "2022": 553922
+      },
+      {
+        "label": "Cash, cash equivalents and restricted cash - End of period",
+        "2024": 788526,
+        "2023": 750345,
+        "2022": 608180
+      }
+    ]
+  },
+  {
+    "table_id": "cash_flow_supplemental",
+    "pdf_page": 90,
+    "document_page": 89,
+    "title": "Supplemental Disclosure of Cash Flow Information",
+    "units": "Amounts in thousands",
+    "columns": [
+      "2024",
+      "2023",
+      "2022"
+    ],
+    "rows": [
+      {
+        "label": "Cash paid for income taxes",
+        "2024": 7620,
+        "2023": 2320,
+        "2022": 615
+      },
+      {
+        "label": "Capitalized software and purchases of intangible assets included in Current liabilities",
+        "2024": null,
+        "2023": null,
+        "2022": 1121
+      },
+      {
+        "label": "Property and equipment included in Current liabilities",
+        "2024": null,
+        "2023": 165,
+        "2022": 166
+      },
+      {
+        "label": "Landlord incentive included in Prepaid expenses and other current assets",
+        "2024": null,
+        "2023": null,
+        "2022": 2148
+      },
+      {
+        "label": "Right of use assets obtained in exchange for new operating lease liabilities",
+        "2024": 33039,
+        "2023": null,
+        "2022": null
+      },
+      {
+        "label": "Right of use assets disposed or adjusted modifying operating leases liabilities",
+        "2024": 1303,
+        "2023": 2024,
+        "2022": null
+      }
+    ]
+  }
+]
