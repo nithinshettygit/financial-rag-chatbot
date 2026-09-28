@@ -1,5 +1,6 @@
- groq 
- python-dotenv    
- faiss-cpu
- sentence-transformers
- pymupdf
+groq 
+python-dotenv    
+faiss-cpu
+sentence-transformers
+pymupdf
+rank-bm25
