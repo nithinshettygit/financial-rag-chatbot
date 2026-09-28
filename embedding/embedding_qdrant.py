@@ -18,7 +18,7 @@ CHUNKS_MANIFEST_PATH = Path(r"D:\xfcatr\srinivasan_venkataramanan_mentoring\proj
 # ============================================================
 # INITIALIZE LOCAL EMBEDDED CONTEXTS
 # ============================================================
-print(f"Loading Local C++ ONNX Inference Engine...")
+print(f"Loading BAAI/bge-small-en-v1.5 TextEmbedding  Engine...")
 embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
 print(f"Initializing Local Embedded Qdrant Storage engine at: {QDRANT_LOCAL_DB_DIR}")

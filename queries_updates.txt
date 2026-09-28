@@ -1,0 +1,25 @@
+Risks Related to Our Intellectual Property
+
+
+EMPLOYEE BENEFIT PLAN
+
+1. What was Duolingo's net income in 2023?
+
+Expected income tax expense at federal statutory rate
+
+2. What were Duolingo's revenue, net income, and bookings in 2023?
+
+3. What percentage of Duolingo's 2023 revenue came from subscriptions?
+
+
+What are Duolingo's sources of revenue?
+
+
+
+
+
+table-extraction -> markdown[ai-ease]
+
+context -> [memory]folowup quns 
+
+vector db [change] [other than fais]

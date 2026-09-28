@@ -116,37 +116,45 @@ def generate_answer(query: str, history: list) -> str:
     # Step 2: Fetch interleaved text blocks and markdown table fragments via RRF
     results = hybrid_search(search_query, top_k=4)
 
-    # Step 3: Map dictionary keys accurately based on your chunk manifest schemas
     context_parts = []
     for i, item in enumerate(results):
-        doc_id = item.get("document_id", "Financial Report")
+        # Fetch chunk metadata safely
+        doc_id = item.get("document_id") or item.get("doc_name") or "Form 10-K"
         meta = item.get("metadata", {})
-        page = meta.get("page_number") or item.get("page", "Unknown")
         
-        # Safe lookup protection wrapper for matching content payload structures
+        page = meta.get("page_number") or item.get("page", "Unknown")
+        section = meta.get("section_title") or meta.get("header") or "Financial Statements"
+        
+        # Construct the Rich Citation Identifier
+        rich_tag = f"S{i+1}: {doc_id}, Page {page}, \"{section}\""
+        
         raw_content = item.get("page_content") or item.get("content") or ""
         
+        # Inject full metadata tag into the context window
         context_parts.append(
-            f"[S{i+1}] Source: {doc_id} | Location: Page {page}\n"
+            f"[{rich_tag}]\n"
             f"{raw_content.strip()}"
         )
 
     context = "\n\n---\n\n".join(context_parts)
 
+    
     if not context.strip():
         return "I could not find sufficient matching financial records in the data repository index."
 
     # Step 4: Construct the system framework payload array
     system_instruction = (
-        "You are an expert financial analysis QA system. Your assignment is to answer the user's query "
-        "using ONLY the verified document context fragments supplied below.\n\n"
-        "CRITICAL PRODUCTION RULES:\n"
-        "1. Rely strictly on the visual structures of Markdown tables for numbers, metrics, and comparisons.\n"
-        "2. Cite your supporting facts explicitly using [S1], [S2], etc., matching the context labels.\n"
-        "3. If the context values are insufficient to answer the question, state that clearly. Never hallucinate financial data.\n\n"
-        f"=== VERIFIED DOCUMENT CONTEXT ===\n{context}\n================================="
-    )
-
+    "You are an expert financial analysis QA system. Your assignment is to answer the user's query "
+    "using ONLY the verified document context fragments supplied below.\n\n"
+    "CRITICAL CITATION & PRODUCTION RULES:\n"
+    "1. Cite every factual claim, number, or table figure using the EXACT full source tag provided in the brackets "
+    "   (e.g., [S1: Form 10-K, Page 48, \"Consolidated Statements of Operations\"]).\n"
+    "2. Place the citation tag directly beside the metric or claim it supports.\n"
+    "3. Rely strictly on Markdown tables for numbers, metrics, and comparisons.\n"
+    "4. If context values are insufficient to answer the question, state that clearly. Never hallucinate financial data.\n\n"
+    f"=== VERIFIED DOCUMENT CONTEXT ===\n{context}\n================================="
+)
+    
     # Cleanly bundle prompt parameters into a well-formed structured API messages array
     messages = [{"role": "system", "content": system_instruction}]
     
