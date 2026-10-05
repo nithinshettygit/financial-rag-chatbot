@@ -1,6 +1,11 @@
-groq 
-python-dotenv    
-faiss-cpu
-sentence-transformers
-pymupdf
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+groq
+qdrant-client
+fastembed
+tiktoken
 rank-bm25
+streamlit
+requests
