@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "docling": {
+      "command": "D:/xfcatr/srinivasan_venkataramanan_mentoring/project-financial-rag-chatbot/vnev/Scripts/docling-mcp-server.exe",
+      "args": [
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "DOCLING_MCP_CONVERSION_MODE": "local",
+        "PYTHONUNBUFFERED": "1",
+        "OMP_NUM_THREADS": "4"
+      }
+    }
+  }
+}

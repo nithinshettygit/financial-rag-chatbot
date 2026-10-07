@@ -91,24 +91,24 @@ class FastDoclingChunker:
     ):
         self.doc_title = doc_title
 
-        # Fix: Enforce token truncation on the tokenizer to avoid transformers warnings
+        # Enforce strict model max length and truncation at the Hugging Face level
         self.hf_tokenizer = AutoTokenizer.from_pretrained(
             embedding_model,
             model_max_length=MAX_TOKENS,
             truncation=True,
         )
+        # Pass the configured hf_tokenizer directly into HuggingFaceTokenizer wrapper
         self.tokenizer = HuggingFaceTokenizer(
-            tokenizer=self.hf_tokenizer, max_tokens=MAX_TOKENS
+            tokenizer=self.hf_tokenizer,
+            max_tokens=MAX_TOKENS,
         )
 
-        # Force CPU execution for local processing
         pipeline_options = PdfPipelineOptions()
         pipeline_options.accelerator_options = AcceleratorOptions(
             num_threads=4, device=AcceleratorDevice.CPU
         )
-        pipeline_options.do_ocr = False  # Disabled for faster processing of digital PDFs
+        pipeline_options.do_ocr = False
 
-        # Fix: Pass max_tokens explicitly to HybridChunker
         self.chunker = HybridChunker(
             tokenizer=self.tokenizer,
             max_tokens=MAX_TOKENS,
@@ -120,11 +120,12 @@ class FastDoclingChunker:
             format_options={"pdf": PdfFormatOption(pipeline_options=pipeline_options)}
         )
 
-    def _truncate(self, text: str, max_tokens: int = EMBED_MAX_TOKENS) -> str:
-        ids = self.hf_tokenizer.encode(text, add_special_tokens=False)
-        if len(ids) > max_tokens:
-            return self.hf_tokenizer.decode(ids[:max_tokens])
-        return text
+    def _truncate(self, text: str, max_tokens: int = MAX_TOKENS) -> str:
+        """Safely truncates text strings exceeding model sequence limit."""
+        ids = self.hf_tokenizer.encode(
+            text, add_special_tokens=False, truncation=True, max_length=max_tokens
+        )
+        return self.hf_tokenizer.decode(ids)
 
     def process_pdf(
         self, pdf_path: Union[str, Path], doc_id: str

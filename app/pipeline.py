@@ -67,7 +67,6 @@ def rerank_results(query: str, results: List[Dict[str, Any]]) -> List[Dict[str, 
         item["final_score"] = item.get("rrf_score", 0.0) + (0.01 * lexical_score) + table_boost
 
     return sorted(results, key=lambda x: x["final_score"], reverse=True)
-
 def build_context(
     results: List[Dict[str, Any]],
     max_tokens: int = settings.MAX_CONTEXT_TOKENS
@@ -77,10 +76,11 @@ def build_context(
     selected_results = []
 
     for item in results:
-        doc_id = item.get("document_id", "Duolingo 10-K")
+        doc_id = item.get("document_id", "Financial Report")
+        source_file = item.get("source_file") or f"{doc_id}.pdf"
         page = item.get("page_number", "N/A")
         chunk_type = item.get("chunk_type", "text")
-        headings = " > ".join(item.get("headings", [])) if isinstance(item.get("headings"), list) else "Main Section"
+        headings = " > ".join(item.get("headings", [])) if isinstance(item.get("headings"), list) and item.get("headings") else "Main Section"
         content = item.get("content", "").strip()
 
         if not content:
@@ -88,14 +88,15 @@ def build_context(
 
         source_id = f"S{len(selected_results) + 1}"
         context_part = (
-            f"[{source_id}]\nDocument: {doc_id} | Page: {page} | Type: {chunk_type}\n"
-            f"Heading Hierarchy: {headings}\nContent:\n{content}"
+            f"[{source_id}]\nFile: {source_file} (Doc ID: {doc_id}) | Page: {page} | Type: {chunk_type}\n"
+            f"Section: {headings}\nContent:\n{content}"
         )
         candidate_context = "\n\n---\n\n".join(context_parts + [context_part])
         if count_tokens(candidate_context) > max_tokens:
             continue
 
-        source_map[source_id] = f"{doc_id}, Page {page}, Header: \"{headings}\""
+        # Enterprise Multi-File Citation mapping
+        source_map[source_id] = f"Source: {source_file}, Page {page}, Section: \"{headings}\""
         context_parts.append(context_part)
         selected_results.append(item)
 
@@ -128,6 +129,7 @@ def handle_chat_summary(history: List) -> str:
 
     prompt = f"""You are the AI assistant in this conversation. Review what you and the user have discussed so far:
 {formatted_history}
+Use only the supplied conversation; do not add facts from outside it.
 Provide a short, 2-3 sentence conversational summary addressing the user directly. 
 Speak from your own perspective (use "You asked about..." and "I provided..."). 
 Keep it warm, natural, and friendly. Do not use bullets, headers, or a QA format."""
@@ -146,6 +148,28 @@ def run_rag_pipeline(request: ChatRequest) -> ChatResponse:
     
     logger.info(f"Session {request.session_id} - Intent: {intent}")
 
+    if intent == "document_inventory":
+        documents = vector_retriever.list_documents()
+        if documents:
+            source_files = sorted(
+                {document["source_file"] for document in documents},
+                key=str.casefold,
+            )
+            answer = "Documents available for QA:\n" + "\n".join(
+                f"- {source_file}" for source_file in source_files
+            )
+        else:
+            answer = "There are currently no documents  for QA."
+
+        return ChatResponse(
+            session_id=request.session_id,
+            answer=answer,
+            intent=intent,
+            search_query=search_query,
+            state=updated_state,
+            retrieved_chunks=[],
+        )
+
     if intent == "chat_summary":
         summary = handle_chat_summary(request.history)
         return ChatResponse(
@@ -158,19 +182,9 @@ def run_rag_pipeline(request: ChatRequest) -> ChatResponse:
         )
 
     if intent == "general_chat":
-        messages = [
-            {"role": "system", "content": "You are a helpful financial assistant. Respond politely to conversational messages."},
-            *[{"role": turn.role, "content": turn.content} for turn in request.history[-4:]],
-            {"role": "user", "content": request.query}
-        ]
-        response = groq_client.chat.completions.create(
-            model=settings.LLM_MODEL, 
-            messages=messages, 
-            temperature=0.7
-        )
         return ChatResponse(
             session_id=request.session_id,
-            answer=response.choices[0].message.content.strip(),
+            answer="Hello. I answer questions using the financial documents in this system.",
             intent=intent,
             search_query=search_query,
             state=updated_state,
@@ -186,7 +200,10 @@ def run_rag_pipeline(request: ChatRequest) -> ChatResponse:
     if not context.strip():
         return ChatResponse(
             session_id=request.session_id,
-            answer="I could not find matching financial records in the repository.",
+            answer=(
+                "I couldn't find support for you question."
+                "I can only answer factual questions from the available data."
+            ),
             intent=intent,
             search_query=search_query,
             state=updated_state,
@@ -197,9 +214,10 @@ def run_rag_pipeline(request: ChatRequest) -> ChatResponse:
 Answer the user query accurately using ONLY the verified Docling context below.
 
 RULES:
-1. Never invent financial facts, metrics, or numbers.
-2. Direct citations are required: append [S1], [S2] for every financial figure quoted.
-3. When requested for percentages or metrics across years (e.g., 2023), find the row and column in the table context and calculate the percentage (Subscription Revenue / Total Revenue * 100).
+1. Use only facts explicitly supported by the verified context. Never answer from general knowledge or invent facts, metrics, or numbers.
+2. If the context does not answer the question, say that the  documents do not contain the answer.
+3. Direct citations are required: append [S1], [S2] for every financial figure quoted.
+4. When requested for percentages or metrics across years (e.g., 2023), find the row and column in the table context and calculate the percentage (Subscription Revenue / Total Revenue * 100).
 
 VERIFIED CONTEXT:
 {context}"""
@@ -223,6 +241,7 @@ VERIFIED CONTEXT:
             chunk_id=res["chunk_id"],
             content=res["content"],
             document_id=res["document_id"],
+            source_file=res.get("source_file", f"{res['document_id']}.pdf"),
             page_number=res["page_number"],
             chunk_type=res["chunk_type"],
             headings=res["headings"],
@@ -231,7 +250,7 @@ VERIFIED CONTEXT:
         )
         for res in results
     ]
-
+    
     return ChatResponse(
         session_id=request.session_id,
         answer=validated_answer,

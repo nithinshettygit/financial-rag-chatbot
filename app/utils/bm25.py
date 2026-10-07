@@ -12,24 +12,37 @@ def tokenize(text: str) -> List[str]:
     return re.findall(r"\d+(?:[.,]\d+)*%?|[a-zA-Z]+", text.lower())
 
 class BM25Retriever:
-    def __init__(self, manifest_path: str = settings.BM25_MANIFEST_PATH):
+    def __init__(self, data_dir: str = getattr(settings, "DATA_DIR", "data")):
         self.valid_chunks = []
         self.bm25 = None
         
-        path = Path(manifest_path)
-        if path.exists():
-            with open(path, encoding="utf-8") as f:
-                chunks = json.load(f)
+        data_path = Path(data_dir)
+        manifest_files = list(data_path.rglob("*_manifest.json")) if data_path.exists() else []
 
-            self.valid_chunks = [
-                c for c in chunks 
-                if c.get("content") and str(c.get("content")).strip() not in ("", "N/A", "[Empty Content]")
-            ]
+        # Fallback to direct path if no wildcard manifests found
+        if not manifest_files and Path(settings.BM25_MANIFEST_PATH).exists():
+            manifest_files = [Path(settings.BM25_MANIFEST_PATH)]
+
+        chunks = []
+        for manifest_file in manifest_files:
+            try:
+                with open(manifest_file, encoding="utf-8") as f:
+                    file_chunks = json.load(f)
+                    chunks.extend(file_chunks)
+            except Exception as e:
+                logger.error(f"Error reading manifest {manifest_file}: {e}")
+
+        self.valid_chunks = [
+            c for c in chunks 
+            if c.get("content") and str(c.get("content")).strip() not in ("", "N/A", "[Empty Content]")
+        ]
+
+        if self.valid_chunks:
             documents = [c["content"] for c in self.valid_chunks]
             tokenized_docs = [tokenize(doc) for doc in documents]
             self.bm25 = BM25Okapi(tokenized_docs)
         else:
-            logger.warning(f"BM25 Manifest file not found at {manifest_path}. BM25 search will return empty results.")
+            logger.warning("No valid manifests found for BM25. Lexical search will return empty results.")
 
     def retrieve(self, query: str, top_k: int = settings.RETRIEVAL_K) -> List[Dict[str, Any]]:
         if not self.bm25 or not self.valid_chunks:
@@ -53,11 +66,13 @@ class BM25Retriever:
                 continue
 
             chunk = self.valid_chunks[i]
+            doc_id = chunk.get("document_id", "doc_default")
 
             results.append({
                 "chunk_id": str(chunk.get("chunk_id", i)),
                 "content": chunk.get("content", ""),
-                "document_id": chunk.get("document_id", "duolingo_10k"),
+                "document_id": doc_id,
+                "source_file": chunk.get("source_file") or f"{doc_id}.pdf",
                 "page_number": chunk.get("page_number") or chunk.get("metadata", {}).get("page_number", "N/A"),
                 "chunk_type": chunk.get("chunk_type", "text"),
                 "headings": chunk.get("headings", []),
