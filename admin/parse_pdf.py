@@ -1,15 +1,14 @@
-# parse_pdf.py
+# admin/parse_pdf.py
 import argparse
 import hashlib
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-import torch
 from transformers import AutoTokenizer
-
 from docling.chunking import HybridChunker
 from docling.datamodel.pipeline_options import (
     AcceleratorDevice,
@@ -17,25 +16,15 @@ from docling.datamodel.pipeline_options import (
     PdfPipelineOptions,
 )
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling_core.transforms.chunker.hierarchical_chunker import (
-    ChunkingDocSerializer,
-    ChunkingSerializerProvider,
-)
 from docling_core.transforms.chunker.tokenizer.huggingface import (
     HuggingFaceTokenizer,
 )
-from docling_core.transforms.serializer.markdown import (
-    MarkdownParams,
-    MarkdownTableSerializer,
-)
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-MAX_TOKENS = 400
-EMBED_MAX_TOKENS = 480
-MIN_ALNUM_CHARS = 30
+MAX_TOKENS = 2048
+MIN_ALNUM_CHARS = 10
 
 _SEPARATOR_ROW = re.compile(r"^\|?[\s:\-|]+\|?$")
-_NUMERIC_CELL = re.compile(r"^[\s$€£(\-–—+]*\d[\d,.\s]*[%)]?\s*[a-zA-Z]{0,2}$")
 
 
 @dataclass
@@ -47,40 +36,46 @@ class DocumentChunk:
     chunk_type: str = "text"
     page_number: Optional[int] = None
     headings: List[str] = field(default_factory=list)
+    table_caption: Optional[str] = None
     source_file: Optional[str] = None
     metadata: Dict = field(default_factory=dict)
 
 
-def profile_table(text: str) -> Dict:
+def extract_table_structure(text: str) -> Dict[str, List[str]]:
+    """Extracts column headers and non-numeric row labels from a markdown table."""
     lines = [
         line.strip()
         for line in text.splitlines()
         if line.startswith("|") and not _SEPARATOR_ROW.match(line)
     ]
-    rows = [[c.strip() for c in line.strip("|").split("|")] for line in lines if line]
+    if not lines:
+        return {"columns": [], "row_labels": []}
+
+    rows = []
+    for line in lines:
+        parts = line.split("|")
+        # Standard markdown table lines have leading and trailing empty elements
+        cells = [c.strip() for c in (parts[1:-1] if len(parts) > 2 else parts)]
+        if any(cells):
+            rows.append(cells)
 
     if not rows:
-        return {"columns": [], "row_labels": [], "meaningful": False}
+        return {"columns": [], "row_labels": []}
 
-    columns = [c for c in rows[0] if c and not _NUMERIC_CELL.match(c)][:20]
-    row_labels = [
-        r[0] for r in rows[1:] if r and r[0] and not _NUMERIC_CELL.match(r[0])
-    ][:40]
+    columns = [c for c in rows[0] if c]
 
-    return {
-        "columns": columns,
-        "row_labels": row_labels,
-        "meaningful": len(rows) >= 2 and (len(columns) > 0 or len(row_labels) > 0),
-    }
+    # Collect row labels across cells (handles indented/nested row headers)
+    row_labels = []
+    for r in rows[1:]:
+        row_label = None
+        for cell in r:
+            if cell and not re.match(r"^[\d\s.,$()%–\-+]+$", cell):
+                row_label = cell
+                break
+        if row_label and row_label not in row_labels:
+            row_labels.append(row_label)
 
-
-class MarkdownTableSerializerProvider(ChunkingSerializerProvider):
-    def get_serializer(self, doc):
-        return ChunkingDocSerializer(
-            doc=doc,
-            table_serializer=MarkdownTableSerializer(),
-            params=MarkdownParams(compact_tables=True),
-        )
+    return {"columns": columns[:15], "row_labels": row_labels[:30]}
 
 
 class FastDoclingChunker:
@@ -91,13 +86,11 @@ class FastDoclingChunker:
     ):
         self.doc_title = doc_title
 
-        # Enforce strict model max length and truncation at the Hugging Face level
         self.hf_tokenizer = AutoTokenizer.from_pretrained(
             embedding_model,
             model_max_length=MAX_TOKENS,
             truncation=True,
         )
-        # Pass the configured hf_tokenizer directly into HuggingFaceTokenizer wrapper
         self.tokenizer = HuggingFaceTokenizer(
             tokenizer=self.hf_tokenizer,
             max_tokens=MAX_TOKENS,
@@ -113,15 +106,14 @@ class FastDoclingChunker:
             tokenizer=self.tokenizer,
             max_tokens=MAX_TOKENS,
             repeat_table_header=True,
-            merge_peers=True,
-            serializer_provider=MarkdownTableSerializerProvider(),
+            merge_peers=False,
         )
         self.converter = DocumentConverter(
             format_options={"pdf": PdfFormatOption(pipeline_options=pipeline_options)}
         )
 
     def _truncate(self, text: str, max_tokens: int = MAX_TOKENS) -> str:
-        """Safely truncates text strings exceeding model sequence limit."""
+        """Safely truncates embedding text strings exceeding model sequence limit."""
         ids = self.hf_tokenizer.encode(
             text, add_special_tokens=False, truncation=True, max_length=max_tokens
         )
@@ -137,7 +129,7 @@ class FastDoclingChunker:
         final_chunks: List[DocumentChunk] = []
         for idx, raw in enumerate(raw_chunks):
             text = (raw.text or "").strip()
-            headings = list(raw.meta.headings or [])
+            headings = list(getattr(raw.meta, "headings", []) or [])
 
             labels = [
                 str(getattr(i, "label", "")).lower()
@@ -146,11 +138,9 @@ class FastDoclingChunker:
             ]
             chunk_type = "table" if any("table" in l for l in labels) else "text"
 
-            if not text or len([c for c in text if c.isalnum()]) < MIN_ALNUM_CHARS:
+            if not text:
                 continue
-
-            profile = profile_table(text) if chunk_type == "table" else None
-            if chunk_type == "table" and not profile["meaningful"]:
+            if chunk_type != "table" and len([c for c in text if c.isalnum()]) < MIN_ALNUM_CHARS:
                 continue
 
             pages = sorted(
@@ -158,24 +148,30 @@ class FastDoclingChunker:
                     int(prov.page_no)
                     for item in getattr(raw.meta, "doc_items", []) or []
                     for prov in getattr(item, "prov", []) or []
-                    if getattr(prov, "page_no", None)
+                    if getattr(prov, "page_no", None) is not None
                 }
             )
             page_num = pages[0] if pages else None
 
+            table_info = extract_table_structure(text) if chunk_type == "table" else {}
+
             emb_parts = []
             if self.doc_title:
-                emb_parts.append(f"Doc: {self.doc_title}")
+                emb_parts.append(f"Document: {self.doc_title}")
+            if page_num:
+                emb_parts.append(f"Page: {page_num}")
             if headings:
-                emb_parts.append(f"Headings: {' > '.join(headings)}")
-            if profile:
-                if profile["columns"]:
-                    emb_parts.append(f"Cols: {', '.join(profile['columns'])}")
-                if profile["row_labels"]:
-                    emb_parts.append(f"Rows: {'; '.join(profile['row_labels'])}")
-            emb_parts.append(text)
+                emb_parts.append(f"Section: {' > '.join(headings)}")
+            if chunk_type == "table":
+                if table_info.get("columns"):
+                    emb_parts.append(f"Table Columns: {', '.join(table_info['columns'])}")
+                if table_info.get("row_labels"):
+                    emb_parts.append(f"Table Metrics: {'; '.join(table_info['row_labels'])}")
 
-            embedding_text = self._truncate("\n".join(emb_parts))
+            emb_parts.append(text)
+            full_embedding_text = "\n".join(emb_parts)
+            embedding_text = self._truncate(full_embedding_text)
+
             chunk_id = hashlib.sha256(
                 f"{doc_id}:{idx}:{text}".encode()
             ).hexdigest()[:16]
@@ -192,8 +188,9 @@ class FastDoclingChunker:
                     source_file=pdf_path.name,
                     metadata={
                         "page_numbers": pages,
-                        "columns": profile["columns"] if profile else [],
-                        "row_labels": profile["row_labels"] if profile else [],
+                        "columns": table_info.get("columns", []),
+                        "row_labels": table_info.get("row_labels", []),
+                        "is_financial_table": chunk_type == "table",
                     },
                 )
             )

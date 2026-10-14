@@ -1,11 +1,18 @@
+import os
 from qdrant_client import QdrantClient
+from qdrant_client.http import models
 from fastembed import TextEmbedding
 from app.config import settings
-from typing import List, Dict, Any
+from app.utils.router import QueryFilters
+from typing import List, Dict, Any, Optional
 
 class QdrantVectorRetriever:
     def __init__(self):
-        self.embedding_model = TextEmbedding(model_name=settings.EMBEDDING_MODEL)
+        self.embedding_model = TextEmbedding(
+            model_name=settings.EMBEDDING_MODEL,
+            cache_dir=os.getenv("FASTEMBED_CACHE_DIR"),
+            local_files_only=os.getenv("FASTEMBED_LOCAL_FILES_ONLY", "false").lower() == "true",
+        )
         
         if getattr(settings, "QDRANT_URL", None):
             self.client = QdrantClient(
@@ -50,25 +57,62 @@ class QdrantVectorRetriever:
             key=lambda document: (document["source_file"].lower(), document["document_id"]),
         )
 
-    def retrieve(self, query: str, top_k: int = settings.RETRIEVAL_K) -> List[Dict[str, Any]]:
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = settings.RETRIEVAL_K,
+        filters: Optional[QueryFilters] = None,
+    ) -> List[Dict[str, Any]]:
+        
         vector = next(self.embedding_model.query_embed(query)).tolist()
+        
+        must_conditions = []
+        if filters:
+            if filters.document_ids:
+                must_conditions.append(
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchAny(any=filters.document_ids),
+                    )
+                )
+            if filters.years:
+                must_conditions.append(
+                    models.Filter(
+                        should=[
+                            models.FieldCondition(
+                                key="fiscal_year",
+                                match=models.MatchAny(any=filters.years),
+                            ),
+                            models.IsEmptyCondition(
+                                is_empty=models.PayloadField(key="fiscal_year")
+                            )
+                        ]
+                    )
+                )
+            if filters.company:
+                must_conditions.append(
+                    models.Filter(
+                        should=[
+                            models.FieldCondition(
+                                key="company",
+                                match=models.MatchValue(value=filters.company),
+                            ),
+                            models.IsEmptyCondition(
+                                is_empty=models.PayloadField(key="company")
+                            )
+                        ]
+                    )
+                )
+
+        query_filter = models.Filter(must=must_conditions) if must_conditions else None
 
         result = self.client.query_points(
             collection_name=settings.COLLECTION_NAME,
             query=vector,
             using=settings.VECTOR_NAME,
             limit=top_k,
-            with_payload=[
-                "chunk_id",
-                "content",
-                "page_content",
-                "document_id",
-                "source_file",
-                "page_number",
-                "chunk_type",
-                "headings",
-                "metadata",
-            ]
+            query_filter=query_filter,
+            with_payload=True
         )
 
         chunks = []

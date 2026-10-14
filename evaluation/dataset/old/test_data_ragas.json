@@ -1,0 +1,242 @@
+[
+  {
+    "user_input": "What were NIKE, Inc.'s total revenues in fiscal 2026?",
+    "retrieved_contexts": [
+      "Consolidated Statements of Income (Page 58)"
+    ],
+    "response": "$46,398 million (about $46.4 billion).",
+    "reference": "$46,398 million (about $46.4 billion)."
+  },
+  {
+    "user_input": "What was NIKE's net income in fiscal 2026?",
+    "retrieved_contexts": [
+      "Consolidated Statements of Income (Page 58)"
+    ],
+    "response": "$3,108 million.",
+    "reference": "$3,108 million."
+  },
+  {
+    "user_input": "What were NIKE's total assets as of May 31, 2026?",
+    "retrieved_contexts": [
+      "Consolidated Balance Sheets (Page 60)"
+    ],
+    "response": "$38,410 million.",
+    "reference": "$38,410 million."
+  },
+  {
+    "user_input": "How much cash and equivalents did NIKE have at May 31, 2026?",
+    "retrieved_contexts": [
+      "Consolidated Balance Sheets (Page 60)"
+    ],
+    "response": "$7,563 million.",
+    "reference": "$7,563 million."
+  },
+  {
+    "user_input": "What was NIKE's gross margin in fiscal 2026?",
+    "retrieved_contexts": [
+      "MD&A – Fiscal 2026 Financial Highlights (Page 32)"
+    ],
+    "response": "42.9%, an increase of 20 basis points from fiscal 2025.",
+    "reference": "42.9%, an increase of 20 basis points from fiscal 2025."
+  },
+  {
+    "user_input": "What was NIKE's diluted earnings per share in fiscal 2026?",
+    "retrieved_contexts": [
+      "Consolidated Statements of Income (Page 58)"
+    ],
+    "response": "$2.10.",
+    "reference": "$2.10."
+  },
+  {
+    "user_input": "Approximately how many employees did NIKE have worldwide as of May 31, 2026?",
+    "retrieved_contexts": [
+      "Item 1. Business – Human Capital Resources (Page 9)"
+    ],
+    "response": "Approximately 73,000 employees, including retail and part-time employees.",
+    "reference": "Approximately 73,000 employees, including retail and part-time employees."
+  },
+  {
+    "user_input": "How did NIKE's total revenues in fiscal 2026 compare with fiscal 2025?",
+    "retrieved_contexts": [
+      "MD&A – Fiscal 2026 Financial Highlights (Page 32)"
+    ],
+    "response": "$46.4 billion vs $46.3 billion: flat on a reported basis and down 2% on a currency-neutral basis.",
+    "reference": "$46.4 billion vs $46.3 billion: flat on a reported basis and down 2% on a currency-neutral basis."
+  },
+  {
+    "user_input": "How did NIKE Brand wholesale revenues compare with NIKE Direct revenues in fiscal 2026 versus fiscal 2025?",
+    "retrieved_contexts": [
+      "MD&A – Fiscal 2026 Financial Highlights (Page 32)"
+    ],
+    "response": "Wholesale rose from $25.9 billion to $27.5 billion, while NIKE Direct fell from $18.8 billion to $17.7 billion (down 6% reported), primarily due to a decrease in traffic.",
+    "reference": "Wholesale rose from $25.9 billion to $27.5 billion, while NIKE Direct fell from $18.8 billion to $17.7 billion (down 6% reported), primarily due to a decrease in traffic."
+  },
+  {
+    "user_input": "How did NIKE's net income change from fiscal 2025 to fiscal 2026?",
+    "retrieved_contexts": [
+      "MD&A – Results of Operations (Page 35)"
+    ],
+    "response": "It decreased 3%, from $3,219 million to $3,108 million.",
+    "reference": "It decreased 3%, from $3,219 million to $3,108 million."
+  },
+  {
+    "user_input": "How did Greater China revenues change in fiscal 2026 compared with fiscal 2025?",
+    "retrieved_contexts": [
+      "MD&A – Segment Information (Page 39)"
+    ],
+    "response": "They fell 11% on a reported basis (13% currency-neutral), from $6,586 million to $5,847 million.",
+    "reference": "They fell 11% on a reported basis (13% currency-neutral), from $6,586 million to $5,847 million."
+  },
+  {
+    "user_input": "How did NIKE's inventories at May 31, 2026 compare with the prior year?",
+    "retrieved_contexts": [
+      "Consolidated Balance Sheets (Page 60)"
+    ],
+    "response": "Inventories were $7.5 billion, flat versus the prior year ($7,501 million vs $7,489 million), reflecting an increase in units offset by product mix.",
+    "reference": "Inventories were $7.5 billion, flat versus the prior year ($7,501 million vs $7,489 million), reflecting an increase in units offset by product mix."
+  },
+  {
+    "user_input": "What were NIKE's revenues in fiscal 2024, 2025 and 2026?",
+    "retrieved_contexts": [
+      "Consolidated Statements of Income (Page 58)"
+    ],
+    "response": "FY2024: $51,362 million; FY2025: $46,309 million; FY2026: $46,398 million.",
+    "reference": "FY2024: $51,362 million; FY2025: $46,309 million; FY2026: $46,398 million."
+  },
+  {
+    "user_input": "What was NIKE's net income in fiscal 2024, 2025 and 2026?",
+    "retrieved_contexts": [
+      "Consolidated Statements of Income (Page 58)"
+    ],
+    "response": "FY2024: $5,700 million; FY2025: $3,219 million; FY2026: $3,108 million.",
+    "reference": "FY2024: $5,700 million; FY2025: $3,219 million; FY2026: $3,108 million."
+  },
+  {
+    "user_input": "What was NIKE's gross margin in fiscal 2024, 2025 and 2026?",
+    "retrieved_contexts": [
+      "MD&A – Results of Operations (Page 35)"
+    ],
+    "response": "FY2024: 44.6%; FY2025: 42.7%; FY2026: 42.9%.",
+    "reference": "FY2024: 44.6%; FY2025: 42.7%; FY2026: 42.9%."
+  },
+  {
+    "user_input": "What was NIKE's diluted EPS in fiscal 2024, 2025 and 2026?",
+    "retrieved_contexts": [
+      "Consolidated Statements of Income (Page 58)"
+    ],
+    "response": "FY2024: $3.73; FY2025: $2.16; FY2026: $2.10.",
+    "reference": "FY2024: $3.73; FY2025: $2.16; FY2026: $2.10."
+  },
+  {
+    "user_input": "How much cash did NIKE's operations provide in fiscal 2024, 2025 and 2026?",
+    "retrieved_contexts": [
+      "Consolidated Statements of Cash Flows (Page 61)"
+    ],
+    "response": "FY2024: $7,429 million; FY2025: $3,698 million; FY2026: $2,868 million.",
+    "reference": "FY2024: $7,429 million; FY2025: $3,698 million; FY2026: $2,868 million."
+  },
+  {
+    "user_input": "What was NIKE's total shareholders' equity at May 31, 2026?",
+    "retrieved_contexts": [
+      "Consolidated Balance Sheets (Page 60)"
+    ],
+    "response": "$14,865 million.",
+    "reference": "$14,865 million."
+  },
+  {
+    "user_input": "What were NIKE's total current liabilities at May 31, 2026?",
+    "retrieved_contexts": [
+      "Consolidated Balance Sheets (Page 60)"
+    ],
+    "response": "$12,547 million.",
+    "reference": "$12,547 million."
+  },
+  {
+    "user_input": "What was NIKE's long-term debt (excluding the current portion) at May 31, 2026?",
+    "retrieved_contexts": [
+      "Consolidated Balance Sheets (Page 60)"
+    ],
+    "response": "$5,942 million (with an additional $2,000 million classified as current portion).",
+    "reference": "$5,942 million (with an additional $2,000 million classified as current portion)."
+  },
+  {
+    "user_input": "How much did NIKE pay in dividends (common and preferred) in fiscal 2026?",
+    "retrieved_contexts": [
+      "Consolidated Statements of Cash Flows (Page 61)"
+    ],
+    "response": "$2,407 million.",
+    "reference": "$2,407 million."
+  },
+  {
+    "user_input": "What were NIKE Brand revenues by product line (footwear, apparel, equipment) in fiscal 2026?",
+    "retrieved_contexts": [
+      "MD&A – Results of Operations (Page 35)"
+    ],
+    "response": "Footwear: $29,525 million; Apparel: $13,449 million; Equipment: $2,199 million.",
+    "reference": "Footwear: $29,525 million; Apparel: $13,449 million; Equipment: $2,199 million."
+  },
+  {
+    "user_input": "How does NIKE define comparable store sales?",
+    "retrieved_contexts": [
+      "MD&A – Comparable Store Sales (Page 34)"
+    ],
+    "response": "Revenues from NIKE-owned in-line and factory stores (excluding NIKE Brand Digital) that have been open at least one year, whose square footage has not changed by more than 15% in the past year, and that have not been permanently repositioned within the past year.",
+    "reference": "Revenues from NIKE-owned in-line and factory stores (excluding NIKE Brand Digital) that have been open at least one year, whose square footage has not changed by more than 15% in the past year, and that have not been permanently repositioned within the past year."
+  },
+  {
+    "user_input": "How does NIKE calculate EBIT?",
+    "retrieved_contexts": [
+      "MD&A – Use of Non-GAAP Financial Measures (Page 34)"
+    ],
+    "response": "Net income before Interest (income) expense, net and Income tax expense; EBIT margin is total EBIT divided by total revenues.",
+    "reference": "Net income before Interest (income) expense, net and Income tax expense; EBIT margin is total EBIT divided by total revenues."
+  },
+  {
+    "user_input": "Which reportable segment had the highest EBIT in fiscal 2026, and how did it change from fiscal 2025?",
+    "retrieved_contexts": [
+      "MD&A – Segment Information (Page 39)"
+    ],
+    "response": "North America, with EBIT of $5,376 million, up 14% from $4,735 million.",
+    "reference": "North America, with EBIT of $5,376 million, up 14% from $4,735 million."
+  },
+  {
+    "user_input": "Why did NIKE Direct revenues decline in fiscal 2026 and which components fell?",
+    "retrieved_contexts": [
+      "MD&A – Fiscal 2026 Compared to Fiscal 2025 (Page 36)"
+    ],
+    "response": "Down 6% reported (8% currency-neutral) due to declines in NIKE Brand Digital sales of 12% (from $9.6 billion to $8.6 billion, driven by reduced traffic) and NIKE store sales of 4% ($9.1 billion vs $9.2 billion).",
+    "reference": "Down 6% reported (8% currency-neutral) due to declines in NIKE Brand Digital sales of 12% (from $9.6 billion to $8.6 billion, driven by reduced traffic) and NIKE store sales of 4% ($9.1 billion vs $9.2 billion)."
+  },
+  {
+    "user_input": "What will NIKE's total revenues be in fiscal 2027?",
+    "retrieved_contexts": [
+      "N/A"
+    ],
+    "response": "Not available in the 10-K. No fiscal 2027 revenue forecast is provided.",
+    "reference": "Not available in the 10-K. No fiscal 2027 revenue forecast is provided."
+  },
+  {
+    "user_input": "What was NIKE's net income in the first quarter of fiscal 2027?",
+    "retrieved_contexts": [
+      "N/A"
+    ],
+    "response": "Not available in the 10-K. This is the fiscal 2026 10-K; fiscal 2027 quarterly results are not included.",
+    "reference": "Not available in the 10-K. This is the fiscal 2026 10-K; fiscal 2027 quarterly results are not included."
+  },
+  {
+    "user_input": "What was the CEO's total compensation in fiscal 2026?",
+    "retrieved_contexts": [
+      "N/A"
+    ],
+    "response": "Not available in the 10-K. Executive compensation is incorporated by reference to the proxy statement, not in the 10-K.",
+    "reference": "Not available in the 10-K. Executive compensation is incorporated by reference to the proxy statement, not in the 10-K."
+  },
+  {
+    "user_input": "What percentage of the global athletic footwear market does NIKE hold?",
+    "retrieved_contexts": [
+      "N/A"
+    ],
+    "response": "Not available in the 10-K. NIKE's overall market share percentage is not disclosed.",
+    "reference": "Not available in the 10-K. NIKE's overall market share percentage is not disclosed."
+  }
+]
