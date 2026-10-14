@@ -1,0 +1,39 @@
+{
+  "dataset": {
+    "total_questions": 30,
+    "successful": 0,
+    "failed": 30,
+    "answerable": 0,
+    "unanswerable": 0
+  },
+  "retrieval": {
+    "hit@1": 0.0,
+    "hit@3": 0.0,
+    "hit@5": 0.0,
+    "recall@1": 0.0,
+    "recall@3": 0.0,
+    "recall@5": 0.0,
+    "precision@1": 0.0,
+    "precision@3": 0.0,
+    "precision@5": 0.0,
+    "mrr": 0.0
+  },
+  "answer_quality": {
+    "correctness": 0.0,
+    "faithfulness": 0.0,
+    "relevancy": 0.0,
+    "overall": 0.0
+  },
+  "abstention": {
+    "correct_abstention_rate": 100.0,
+    "false_answer_rate": 0.0
+  },
+  "overall": {
+    "retrieval_score": 0.0,
+    "answer_quality_score": 0.0,
+    "abstention_score": 100.0,
+    "overall_score": 100.0,
+    "grade": "A",
+    "status": "PASS"
+  }
+}

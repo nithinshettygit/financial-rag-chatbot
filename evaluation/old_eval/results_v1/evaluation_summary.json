@@ -1,0 +1,39 @@
+{
+  "dataset": {
+    "total_questions": 30,
+    "successful": 30,
+    "failed": 0,
+    "answerable": 26,
+    "unanswerable": 4
+  },
+  "retrieval": {
+    "hit@1": 7.69,
+    "hit@3": 42.31,
+    "hit@5": 53.85,
+    "recall@1": 7.69,
+    "recall@3": 42.31,
+    "recall@5": 53.85,
+    "precision@1": 7.69,
+    "precision@3": 14.1,
+    "precision@5": 16.67,
+    "mrr": 25.96
+  },
+  "answer_quality": {
+    "correctness": 65.38,
+    "faithfulness": 84.62,
+    "relevancy": 73.08,
+    "overall": 74.36
+  },
+  "abstention": {
+    "correct_abstention_rate": 100.0,
+    "false_answer_rate": 0.0
+  },
+  "overall": {
+    "retrieval_score": 53.85,
+    "answer_quality_score": 74.36,
+    "abstention_score": 100.0,
+    "overall_score": 72.45,
+    "grade": "C",
+    "status": "NEEDS IMPROVEMENT"
+  }
+}

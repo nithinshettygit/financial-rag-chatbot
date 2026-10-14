@@ -1,122 +1,252 @@
+import asyncio
 import json
 import re
-from typing import List, Tuple
-from groq import Groq
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
 from app.config import settings
 from app.schemas import ChatTurn, SessionState
+from app.utils.llm import chat_with_retry, get_groq_clients
 from app.utils.logger import logger
 
-client = Groq(api_key=settings.GROQ_API_KEY)
+client = get_groq_clients(timeout=20.0)  # on failure we fall back to heuristics
+
+_YEAR_RE = re.compile(r"\b(201\d|202\d|203\d)\b")
+_SUFFIXES = {"inc", "incorporated", "corp", "corporation", "company", "co", "ltd", "limited", "plc"}
+MAX_SUB_QUERIES = 12
+
+
+class QueryFilters(BaseModel):
+    years: Optional[List[int]] = None
+    company: Optional[str] = None
+    document_ids: Optional[List[str]] = None
+
+
+class SubQuery(BaseModel):
+    text: str
+    entity: Optional[str] = None  # None = no specific company
+
+
+class RoutePlan(BaseModel):
+    intent: str
+    search_query: str
+    state: SessionState
+    entities: List[str] = Field(default_factory=list)
+    years: List[int] = Field(default_factory=list)
+    sub_queries: List[SubQuery] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+def company_key(text: str) -> str:
+    terms = re.findall(r"[a-z0-9]+", str(text or "").lower())
+    while terms and terms[-1] in _SUFFIXES:
+        terms.pop()
+    return " ".join(terms)
 
 
 def is_document_inventory_query(query: str) -> bool:
-    normalized_query = query.lower()
-    mentions_documents = re.search(
-        r"\b(documents?|files?|reports?|(?:data\s+)?sources?|datasets?|knowledge\s+bases?)\b",
-        normalized_query,
+    q = query.lower()
+    # Exclude financial metric contexts like "revenue source", "segment source", etc.
+    if re.search(r"\b(revenue|segment|income|earnings|cash|expense|cost)s?\s+sources?\b", q):
+        return False
+
+    mentions = re.search(
+        r"\b(documents?|files?|reports?|(?:data\s+)?sources?|datasets?|knowledge\s+bases?)\b", q
     )
-    asks_for_inventory = re.search(
-        r"\b(list|show|display|available|indexed|uploaded)\b", normalized_query
-    ) or re.search(
-        r"\b(what|which)\b.{0,60}\b(documents?|files?|reports?|sources?|datasets?)\b",
-        normalized_query,
+    asks = re.search(r"\b(list|show|display|available|indexed|uploaded)\b", q) or re.search(
+        r"\b(what|which)\b.{0,60}\b(documents?|files?|reports?|sources?|datasets?)\b", q
     )
-    return bool(mentions_documents and asks_for_inventory)
+    return bool(mentions and asks)
+# app/utils/router.py
+
+def detect_known_entities(query: str, known_companies: List[str]) -> List[str]:
+    """Deterministic entity detection against the indexed company list (LLM-independent)."""
+    q = f" {company_key(query)} "
+    found = []
+    for name in known_companies:
+        key = company_key(name)
+        if key and f" {key} " in q:
+            found.append(name)
+    return found
 
 
-def is_simple_greeting(query: str) -> bool:
-    return bool(
-        re.fullmatch(
-            r"\s*(?:hi|hello|hey|good morning|good afternoon|good evening|"
-            r"thanks?(?: a lot| so much)?|thank you(?: so much)?|bye|goodbye)"
-            r"(?: there)?[.!?]*\s*",
-            query.lower(),
-        )
-    )
+def _canonical_entity(entity: str, known: List[str]) -> str:
+    key = company_key(entity)
+    for name in known:
+        k = company_key(name)
+        if k and (k == key or k in key or key in k):
+            return name
+    return entity.strip()
 
 
-def classify_and_prepare(
-    query: str, history: List[ChatTurn], state: SessionState
-) -> Tuple[str, str, SessionState]:
-    if is_document_inventory_query(query):
-        return "document_inventory", query, state
-    if is_simple_greeting(query):
-        return "general_chat", query, state
+def _dedupe(items: List[str]) -> List[str]:
+    seen, out = set(), []
+    for item in items:
+        k = company_key(item)
+        if k and k not in seen:
+            seen.add(k)
+            out.append(item)
+    return out
 
-    recent_history = history[-min(settings.MAX_HISTORY_TURNS, 4) :]
+
+def _fallback_metrics(query: str, entities: List[str]) -> List[str]:
+    """Regex decomposition used only when the LLM router is unavailable."""
+    text = re.sub(r"^\s*(?:what\s+(?:were|was|is|are)|show|give me|tell me|compare|list)\s+", "", query.replace("?", " "), flags=re.I)
+    text = _YEAR_RE.sub(" ", text)
+    for e in entities:
+        text = re.sub(re.escape(e) + r"(?:'s)?", " ", text, flags=re.I)
+    parts = []
+    for p in re.split(r",|&|\band\b", text):
+        p = re.sub(r"^\s*(?:the|in|for|of|their|its)\s+", "", p.strip(), flags=re.I).strip()
+        if len(p) > 2:
+            parts.append(p)
+    return parts or [query]
+
+
+def build_filters(
+    years: Optional[List[int]], company: Optional[str], document_ids: Optional[List[str]]
+) -> QueryFilters:
+    return QueryFilters(years=years or None, company=company, document_ids=document_ids or None)
+
+
+# --------------------------------------------------------------------------- #
+# LLM call (sync; executed in a worker thread)
+# --------------------------------------------------------------------------- #
+# app/utils/router.py (Snippet of the prompt instructions)
+# app/utils/router.py
+
+def _call_router_llm(query: str, history: List[ChatTurn], state: SessionState, known: List[str]) -> Dict[str, Any]:
+    recent = history[-min(settings.MAX_HISTORY_TURNS, 4):] if history else []
     history_text = "\n".join(
-        f"{turn.role}: {turn.content if turn.role == 'user' else turn.content[:240]}"
-        for turn in recent_history
+        f"{t.role}: {t.content if t.role == 'user' else t.content[:240]}" for t in recent
     )
+    prompt = f"""You are a query router for an enterprise multi-document financial RAG system.
 
-    prompt = f"""You are an intelligent query router and search query rewriter for an enterprise multi-document financial RAG system.
+Indexed companies: {json.dumps(known)}
+Current Session State: {json.dumps(state.model_dump())}
+Recent Conversation:
+{history_text or "No prior history"}
 
-Current Session State:
-{json.dumps(state.model_dump())}
-
-Recent Conversation History:
-{history_text if history_text else "No prior history"}
-
-Latest User Query:
-"{query}"
+Latest User Query: "{query}"
 
 Tasks:
-1. Classify Query Intent:
-    - "rag_search": Every factual question or request about financial, company, or business information that must be answered from indexed documents.
-   - "chat_summary": Requests to summarize, recap, or review past discussion.
-    - "general_chat": Only a standalone greeting or thank-you. Do not classify factual questions as general chat.
+1. intent:
+   - "rag_search": For factual questions about financial data, metrics, documents, or company filings.
+   - "chat_summary": When the user asks to summarize, recap, or review our conversation (e.g. "summarize", "recap", "summary").
+   - "general_chat": For greetings, casual small talk, well-being inquiries ("how are you"), or capability questions.
+2. entities: ALL companies the latest query is about.
+3. metrics: distinct topics asked about (short noun phrases).
+4. fiscal_years: list of years explicitly requested.
+5. search_query: standalone rewrite for rag_search queries.
+6. state: company, fiscal_year, target_metric, document_id.
 
-2. State Tracking:
-   - Extract/update fields: `company`, `fiscal_year`, `target_metric`, and `document_id` if explicitly stated or inferred from context.
-   - Preserve existing state attributes if not explicitly overridden by the latest user query.
-
-3. Rewrite Search Query (for "rag_search"):
-   - Formulate a clear, self-contained, standalone search query.
-   - Include company, document name, fiscal year, and target metrics when present to maximize vector and BM25 retrieval accuracy across multiple PDF documents.
-   - Do NOT invent metrics or years not requested or present in state context.
-
-Return ONLY a valid JSON object matching this schema:
-{{
-  "intent": "rag_search" | "chat_summary" | "general_chat",
-  "state": {{
-    "company": str or null,
-    "fiscal_year": str or null,
-    "target_metric": str or null,
-    "document_id": str or null
-  }},
-  "search_query": "standalone search query"
-}}"""
-
+Return ONLY JSON:
+{{"intent": "rag_search"|"chat_summary"|"general_chat",
+  "entities": [str], "metrics": [str], "fiscal_years": [int],
+  "search_query": str,
+  "state": {{"company": str|null, "fiscal_year": str|null, "target_metric": str|null, "document_id": str|null}}}}"""
     try:
-        response = client.chat.completions.create(
+        resp = chat_with_retry(
+            client,
             model=settings.LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             response_format={"type": "json_object"},
         )
-
-        data = json.loads(response.choices[0].message.content)
-        intent = data.get("intent", "rag_search")
-        if intent not in {"rag_search", "chat_summary"}:
-            intent = "rag_search"
-        updated_state_dict = data.get("state", {})
-
-        # Merge extracted state with current state
-        updated_state = SessionState(
-            company=updated_state_dict.get("company") or state.company,
-            fiscal_year=updated_state_dict.get("fiscal_year") or state.fiscal_year,
-            target_metric=updated_state_dict.get("target_metric") or state.target_metric,
-        )
-        if hasattr(updated_state, "document_id"):
-            setattr(
-                updated_state,
-                "document_id",
-                updated_state_dict.get("document_id") or getattr(state, "document_id", None),
-            )
-
-        search_query = data.get("search_query", "").strip() or query
-        return intent, search_query, updated_state
-
+        data = json.loads(resp.choices[0].message.content)
+        return data if isinstance(data, dict) else {}
     except Exception as e:
-        logger.error(f"Error in router classification: {e}")
-        return "rag_search", query, state
+        logger.error(f"Router LLM failed: {e}")
+        return {}
+    
+
+async def plan_query(
+    query: str,
+    history: List[ChatTurn],
+    state: SessionState,
+    known_companies: Optional[List[str]] = None,
+) -> RoutePlan:
+    known = known_companies or []
+
+    # Only keep the safe document inventory check if explicit file listing is requested
+    if is_document_inventory_query(query):
+        return RoutePlan(intent="document_inventory", search_query=query, state=state)
+
+    data = await asyncio.to_thread(_call_router_llm, query, history, state, known)
+    intent = data.get("intent", "rag_search")
+    if intent not in {"rag_search", "chat_summary", "general_chat", "document_inventory"}:
+        intent = "rag_search"
+
+    llm_state = data.get("state") or {}
+    search_query = (data.get("search_query") or "").strip() or query
+
+    # ---- entities (LLM + deterministic detection) ----
+    raw_entities = [str(e) for e in (data.get("entities") or []) if str(e).strip()]
+    entities = _dedupe(
+        [_canonical_entity(e, known) for e in raw_entities] + detect_known_entities(query, known)
+    )
+
+    # ---- years ----
+    years = {int(y) for y in _YEAR_RE.findall(query)}
+    for y in data.get("fiscal_years") or []:
+        try:
+            if 1990 <= int(y) <= 2100:
+                years.add(int(y))
+        except (TypeError, ValueError):
+            pass
+    years_list = sorted(years)
+    if not years_list and state.fiscal_year:
+        try:
+            years_list = [int(state.fiscal_year)]
+        except (TypeError, ValueError):
+            pass
+
+    # ---- session state: multiple entities UNLOCK the single-company lock ----
+    if len(entities) > 1:
+        company, document_id = None, None
+    elif len(entities) == 1:
+        company = entities[0]
+        same_company = company_key(state.company or "") == company_key(company)
+        document_id = llm_state.get("document_id") or (state.document_id if same_company else None)
+    else:
+        company = llm_state.get("company") or state.company
+        document_id = llm_state.get("document_id") or state.document_id
+
+    explicit_year = len(years) == 1 and bool(_YEAR_RE.search(query))
+    new_state = SessionState(
+        company=company,
+        fiscal_year=str(years_list[0]) if (explicit_year and years_list) else (llm_state.get("fiscal_year") or state.fiscal_year),
+        target_metric=llm_state.get("target_metric") or state.target_metric,
+        document_id=document_id,
+    )
+
+    # Entities used for retrieval: explicit ones, else the (carried-over) state company.
+    effective_entities = entities or ([company] if company else [])
+
+    # ---- metric decomposition ----
+    metrics = [str(m).strip() for m in (data.get("metrics") or []) if str(m).strip()]
+    if not metrics:
+        metrics = _fallback_metrics(query, effective_entities)
+
+    year_str = " ".join(str(y) for y in years_list)
+    if len(metrics) <= 1 and len(effective_entities) <= 1:
+        sub_queries = [SubQuery(text=search_query, entity=effective_entities[0] if effective_entities else None)]
+    else:
+        sub_queries = []
+        for entity in effective_entities or [None]:
+            for metric in metrics:
+                text = " ".join(p for p in (entity, metric, year_str) if p)
+                sub_queries.append(SubQuery(text=text, entity=entity))
+        sub_queries = sub_queries[:MAX_SUB_QUERIES]
+
+    return RoutePlan(
+        intent=intent,
+        search_query=search_query,
+        state=new_state,
+        entities=effective_entities,
+        years=years_list,
+        sub_queries=sub_queries,
+    )

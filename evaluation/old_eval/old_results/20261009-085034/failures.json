@@ -1,0 +1,376 @@
+[
+  {
+    "id": "q003",
+    "question_type": "numerical",
+    "question": "What were NIKE's total assets as of May 31, 2026?",
+    "failure_category": "retrieval_miss",
+    "expected_answer": "$38,410 million.",
+    "actual_answer": "Based on the provided context, the specific figure for **Nike Inc. total assets** as of May 31, 2026, is **not present**.\n\nThe context provides the following related asset figures, but not the total:\n*   **Total Long-Lived Assets**: $7,634 million as of May 31, 2026 [S3: Source: Nike-Inc-2026-10K.pdf, Page 90, Section: \"REVENUES AND LONG-LIVED ASSETS BY GEOGRAPHIC AREA\"].\n*   **Inventories**: $7.5 billion as of May 31, 2026 [S1: Source: Nike-Inc-2026-10K.pdf, Page 32, Section: \"FISCAL 2026 FINANCIAL HIGHLIGHTS\"].\n*   **Net Deferred Tax Asset**: $2,593 million for the period ended May 31, 2026 [S2: Source: Nike-Inc-2026-10K.pdf, Page 76, Section: \"NOTE 7 - INCOME TAXES\"].\n*   **Assets at Fair Value**: The table in [S4: Source: Nike-Inc-2026-10K.pdf, Page 71, Section: \"NOTE 4 - FAIR VALUE MEASUREMENTS\"] provides fair value details for May 31, 2025, but the text for May 31, 2026 only specifies short-term investment amounts ($590 million and $874 million) without a total asset balance sheet figure.\n\nTherefore, the exact total assets figure for May 31, 2026, is missing from the provided documents.",
+    "error": null,
+    "retrieval_metrics": {
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@10": 0.0,
+      "recall@10": 0.0,
+      "precision@10": 0.0,
+      "ndcg@10": 0.0,
+      "hit@ctx": 0.0,
+      "recall@ctx": 0.0,
+      "precision@ctx": 0.0,
+      "ndcg@ctx": 0.0,
+      "mrr": 0.0
+    },
+    "answer_quality": {
+      "correctness": 0.0,
+      "faithfulness": 0.0,
+      "relevancy": 1.0,
+      "abstained": true,
+      "partially_abstained": false,
+      "unsupported_claims": [
+        "Total Long-Lived Assets: $7,634 million as of May 31, 2026",
+        "Inventories: $7.5 billion as of May 31, 2026",
+        "Net Deferred Tax Asset: $2,593 million for the period ended May 31, 2026",
+        "Short-term investment amounts ($590 million and $874 million) for May 31, 2026"
+      ],
+      "fact_verdicts": [
+        {
+          "id": 1,
+          "covered": false
+        }
+      ],
+      "reason": "The generated answer correctly identifies that the specific total assets figure is not present in the provided context, although the question is marked as answerable from the documents (implying the context provided to the evaluator might be incomplete or the model failed to find it if it were there, but based strictly on the provided retrieved context, the figure is indeed missing).",
+      "judge_model": "qwen/qwen3.8-27b",
+      "judge_failed": false
+    },
+    "search_query": "Nike Inc total assets as of May 31, 2026"
+  },
+  {
+    "id": "q011",
+    "question_type": "comparison",
+    "question": "How did Greater China revenues change in fiscal 2026 compared with fiscal 2025?",
+    "failure_category": "retrieval_miss",
+    "expected_answer": "They fell 11% on a reported basis (13% currency-neutral), from $6,586 million to $5,847 million.",
+    "actual_answer": "Based on the provided context, the specific dollar amounts for Nike Inc. Greater China revenues for fiscal 2026 and fiscal 2025 are **not explicitly stated**.\n\nHowever, the context provides the following percentage changes and related details:\n*   **Fiscal 2026 vs. Fiscal 2025 Change:** Greater China revenues **decreased 13% on a currency-neutral basis** [S4: Source: Nike-Inc-2026-10K.pdf, Page 42, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"].\n*   **Drivers of Decrease:**\n    *   Wholesale revenues decreased 14% [S4: Source: Nike-Inc-2026-10K.pdf, Page 42, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"].\n    *   NIKE Direct revenues decreased 12%, driven by declines in digital sales of 29% and store sales of 4% [S4: Source: Nike-Inc-2026-10K.pdf, Page 42, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"].\n    *   Comparable store sales decreased 6% [S4: Source: Nike-Inc-2026-10K.pdf, Page 42, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"].\n*   **Impact on Total Revenues:** The decrease in Greater China revenues reduced NIKE, Inc. total revenues by approximately **2 percentage points** on a currency-neutral basis [S2: Source: Nike-Inc-2026-10K.pdf, Page 36, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"].\n\nThe context does not provide the absolute revenue figures (in billions of dollars) for Greater China for either fiscal year.",
+    "error": null,
+    "retrieval_metrics": {
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@10": 0.0,
+      "recall@10": 0.0,
+      "precision@10": 0.0,
+      "ndcg@10": 0.0,
+      "hit@ctx": 0.0,
+      "recall@ctx": 0.0,
+      "precision@ctx": 0.0,
+      "ndcg@ctx": 0.0,
+      "mrr": 0.0
+    },
+    "answer_quality": {
+      "correctness": 0.0,
+      "faithfulness": 0.0,
+      "relevancy": 0.5,
+      "abstained": true,
+      "partially_abstained": false,
+      "unsupported_claims": [
+        "Greater China revenues decreased 13% on a currency-neutral basis",
+        "Wholesale revenues decreased 14%",
+        "NIKE Direct revenues decreased 12%",
+        "Digital sales decreased 29%",
+        "Store sales decreased 4%",
+        "Comparable store sales decreased 6%",
+        "The decrease in Greater China revenues reduced NIKE, Inc. total revenues by approximately 2 percentage points"
+      ],
+      "fact_verdicts": [
+        {
+          "id": 1,
+          "covered": false
+        }
+      ],
+      "reason": "The answer correctly identifies the 13% currency-neutral decrease but fails to provide the specific dollar amounts and reported basis percentage required by the expected answer, explicitly stating that absolute figures are not available in the context.",
+      "judge_model": "qwen/qwen3.8-27b",
+      "judge_failed": false
+    },
+    "search_query": "Nike Inc Greater China revenues fiscal 2026 vs fiscal 2025"
+  },
+  {
+    "id": "q013",
+    "question_type": "multi-year",
+    "question": "What were NIKE's revenues in fiscal 2024, 2025 and 2026?",
+    "failure_category": "retrieval_miss",
+    "expected_answer": "FY2024: $51,362 million; FY2025: $46,309 million; FY2026: $46,398 million.",
+    "actual_answer": "Based on the provided context, the revenues for Nike, Inc. are as follows:\n\n*   **Fiscal 2026:** $46.4 billion [S1: Source: Nike-Inc-2026-10K.pdf, Page 32, Section: \"FISCAL 2026 FINANCIAL HIGHLIGHTS\"][S2: Source: Nike-Inc-2026-10K.pdf, Page 36, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"]\n*   **Fiscal 2025:** $46.3 billion [S1: Source: Nike-Inc-2026-10K.pdf, Page 32, Section: \"FISCAL 2026 FINANCIAL HIGHLIGHTS\"][S2: Source: Nike-Inc-2026-10K.pdf, Page 36, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"]\n*   **Fiscal 2024:** The specific total revenue figure for Nike, Inc. for fiscal 2024 is **not present** in the provided context. While [S4: Source: Nike-Inc-2026-10K.pdf, Page 35, Section: \"REVENUES\"] lists fiscal 2024 revenues for specific segments (e.g., Total NIKE Brand Revenues of $49,322 million), it does not provide the consolidated total for Nike, Inc. for that year.",
+    "error": null,
+    "retrieval_metrics": {
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@10": 0.0,
+      "recall@10": 0.0,
+      "precision@10": 0.0,
+      "ndcg@10": 0.0,
+      "hit@ctx": 0.0,
+      "recall@ctx": 0.0,
+      "precision@ctx": 0.0,
+      "ndcg@ctx": 0.0,
+      "mrr": 0.0
+    },
+    "answer_quality": {
+      "correctness": 0.0,
+      "faithfulness": 0.6666666666666667,
+      "relevancy": 1.0,
+      "abstained": false,
+      "partially_abstained": true,
+      "unsupported_claims": [
+        "Fiscal 2024: The specific total revenue figure for Nike, Inc. for fiscal 2024 is not present in the provided context."
+      ],
+      "fact_verdicts": [
+        {
+          "id": 1,
+          "covered": false
+        }
+      ],
+      "reason": "The answer correctly provides FY2025 and FY2026 revenues but incorrectly claims FY2024 consolidated revenue is unavailable, despite the context containing the necessary data to derive it or referencing the prior year's 10-K which would contain it, and the expected answer provides the specific figure.",
+      "judge_model": "qwen/qwen3.8-27b",
+      "judge_failed": false
+    },
+    "search_query": "Nike Inc revenues in fiscal 2024, 2025 and 2026"
+  },
+  {
+    "id": "q014",
+    "question_type": "multi-year",
+    "question": "What was NIKE's net income in fiscal 2024, 2025 and 2026?",
+    "failure_category": "retrieval_miss",
+    "expected_answer": "FY2024: $5,700 million; FY2025: $3,219 million; FY2026: $3,108 million.",
+    "actual_answer": "Based on the provided context, here is the net income information for Nike, Inc.:\n\n*   **Fiscal 2026:** Net income was **$3,108 million** [S4: Source: Nike-Inc-2026-10K.pdf, Page 48, Section: \"OPERATIONS:\"].\n*   **Fiscal 2025:** Net income was **$3,219 million** [S4: Source: Nike-Inc-2026-10K.pdf, Page 48, Section: \"OPERATIONS:\"].\n*   **Fiscal 2024:** The specific net income figure for fiscal 2024 is **missing** from the provided context. While [S3: Source: Nike-Inc-2026-10K.pdf, Page 39, Section: \"SEGMENT INFORMATION\"] provides the net income *margin* for fiscal 2024 (11.1%) and total revenues ($51,362 million), it does not explicitly state the net income dollar amount for that year.\n\n[S1: Source: Nike-Inc-2026-10K.pdf, Page 36, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"], [S2: Source: Nike-Inc-2026-10K.pdf, Page 36, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"], [S3: Source: Nike-Inc-2026-10K.pdf, Page 39, Section: \"SEGMENT INFORMATION\"], [S4: Source: Nike-Inc-2026-10K.pdf, Page 48, Section: \"OPERATIONS:\"], [S5: Source: Nike-Inc-2026-10K.pdf, Page 45, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"]",
+    "error": null,
+    "retrieval_metrics": {
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@10": 0.0,
+      "recall@10": 0.0,
+      "precision@10": 0.0,
+      "ndcg@10": 0.0,
+      "hit@ctx": 0.0,
+      "recall@ctx": 0.0,
+      "precision@ctx": 0.0,
+      "ndcg@ctx": 0.0,
+      "mrr": 0.0
+    },
+    "answer_quality": {
+      "correctness": 0.0,
+      "faithfulness": 0.6666666666666667,
+      "relevancy": 1.0,
+      "abstained": false,
+      "partially_abstained": true,
+      "unsupported_claims": [
+        "Fiscal 2024 net income figure is missing from the provided context"
+      ],
+      "fact_verdicts": [
+        {
+          "id": 1,
+          "covered": false
+        }
+      ],
+      "reason": "The answer correctly provides net income for FY2025 and FY2026 but incorrectly states that FY2024 net income is missing, despite the context providing the necessary data (Revenue and Margin) to derive it or potentially containing it in a part not explicitly quoted in the summary but implied by the 'missing' claim being false relative to the expected answer's availability.",
+      "judge_model": "qwen/qwen3.8-27b",
+      "judge_failed": false
+    },
+    "search_query": "Nike Inc net income fiscal 2024 2025 2026"
+  },
+  {
+    "id": "q015",
+    "question_type": "multi-year",
+    "question": "What was NIKE's gross margin in fiscal 2024, 2025 and 2026?",
+    "failure_category": "retrieval_miss",
+    "expected_answer": "FY2024: 44.6%; FY2025: 42.7%; FY2026: 42.9%.",
+    "actual_answer": "Based on the provided context, here is the gross margin for Nike, Inc. for the requested fiscal years:\n\n*   **Fiscal 2026:** 42.9% [S1: Source: Nike-Inc-2026-10K.pdf, Page 32, Section: \"FISCAL 2026 FINANCIAL HIGHLIGHTS\"][S2: Source: Nike-Inc-2026-10K.pdf, Page 36, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"]\n*   **Fiscal 2025:** 42.7% [S2: Source: Nike-Inc-2026-10K.pdf, Page 36, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"]\n*   **Fiscal 2024:** The specific gross margin percentage for fiscal 2024 is **missing** from the provided context. While [S3: Source: Nike-Inc-2026-10K.pdf, Page 39, Section: \"SEGMENT INFORMATION\"] provides the EBIT margin for fiscal 2024 (12.7%) and [S5: Source: Nike-Inc-2026-10K.pdf, Page 40, Section: \"NORTH AMERICA\"] provides gross profit figures for North America in fiscal 2024, the consolidated gross margin percentage for the entire company in fiscal 2024 is not stated.\n\n[S1: Source: Nike-Inc-2026-10K.pdf, Page 32, Section: \"FISCAL 2026 FINANCIAL HIGHLIGHTS\"] states that gross margin in fiscal 2026 increased 20 basis points to 42.9%. [S2: Source: Nike-Inc-2026-10K.pdf, Page 36, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"] confirms that gross margin increased 20 basis points to 42.9% for fiscal 2026 compared to 42.7% for fiscal 2025.",
+    "error": null,
+    "retrieval_metrics": {
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@10": 0.0,
+      "recall@10": 0.0,
+      "precision@10": 0.0,
+      "ndcg@10": 0.0,
+      "hit@ctx": 0.0,
+      "recall@ctx": 0.0,
+      "precision@ctx": 0.0,
+      "ndcg@ctx": 0.0,
+      "mrr": 0.0
+    },
+    "answer_quality": {
+      "correctness": 0.0,
+      "faithfulness": 0.6666666666666667,
+      "relevancy": 1.0,
+      "abstained": false,
+      "partially_abstained": true,
+      "unsupported_claims": [
+        "Fiscal 2024 gross margin is missing from the provided context"
+      ],
+      "fact_verdicts": [
+        {
+          "id": 1,
+          "covered": false
+        }
+      ],
+      "reason": "The answer correctly identifies the gross margins for FY2025 and FY2026 but incorrectly claims the FY2024 gross margin is unavailable, despite the retrieved context containing the necessary data (Revenues and Gross Profit) to calculate it or potentially stating it in a section not fully quoted but implied by the table structure.",
+      "judge_model": "qwen/qwen3.8-27b",
+      "judge_failed": false
+    },
+    "search_query": "Nike Inc gross margin fiscal 2024 2025 2026"
+  },
+  {
+    "id": "q021",
+    "question_type": "table-based",
+    "question": "How much did NIKE pay in dividends (common and preferred) in fiscal 2026?",
+    "failure_category": "retrieval_miss",
+    "expected_answer": "$2,407 million.",
+    "actual_answer": "Based on the provided context, the specific total amount paid in dividends (common and preferred) for fiscal 2026 is **not explicitly stated** as a single line item. However, the following related figures are available:\n\n*   **Total Capital Returned:** Nike returned approximately **$2.5 billion** to shareholders in fiscal 2026, primarily through dividends [S1: Source: Nike-Inc-2026-10K.pdf, Page 32, Section: \"FISCAL 2026 FINANCIAL HIGHLIGHTS\"].\n*   **Preferred Dividends:** The context notes that a cumulative dividend of **$0.10 per share** is payable annually on the redeemable preferred stock [S4: Source: Nike-Inc-2026-10K.pdf, Page 78, Section: \"NOTE 8 - REDEEMABLE PREFERRED STOCK\"]. However, it does not specify the number of preferred shares outstanding to calculate the total preferred dividend amount, nor does it state the total cash paid for preferred dividends in fiscal 2026.\n*   **Financing Activities:** Cash used by financing activities was **$2,292 million** in fiscal 2026, which was primarily driven by dividend payments, but this figure also includes other financing activities (such as the $122.4 million in share repurchases mentioned in [S2: Source: Nike-Inc-2026-10K.pdf, Page 48, Section: \"FINANCING ACTIVITIES:\"]) and does not isolate the exact dividend total [S2: Source: Nike-Inc-2026-10K.pdf, Page 48, Section: \"FINANCING ACTIVITIES:\"].\n\nTherefore, while the context indicates that approximately $2.5 billion was returned to shareholders primarily via dividends [S1: Source: Nike-Inc-2026-10K.pdf, Page 32, Section: \"FISCAL 2026 FINANCIAL HIGHLIGHTS\"], it does not provide the exact breakdown or total cash outflow specifically for common and preferred dividends combined.",
+    "error": null,
+    "retrieval_metrics": {
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@10": 0.0,
+      "recall@10": 0.0,
+      "precision@10": 0.0,
+      "ndcg@10": 0.0,
+      "hit@ctx": 0.0,
+      "recall@ctx": 0.0,
+      "precision@ctx": 0.0,
+      "ndcg@ctx": 0.0,
+      "mrr": 0.0
+    },
+    "answer_quality": {
+      "correctness": 0.0,
+      "faithfulness": 0.0,
+      "relevancy": 0.5,
+      "abstained": true,
+      "partially_abstained": false,
+      "unsupported_claims": [
+        "Nike returned approximately $2.5 billion to shareholders in fiscal 2026 primarily through dividends",
+        "Cash used by financing activities was $2,292 million in fiscal 2026",
+        "A cumulative dividend of $0.10 per share is payable annually on the redeemable preferred stock",
+        "Nike purchased a total of 1.8 million shares of NIKE's Class B Common Stock for $122.4 million in fiscal 2026"
+      ],
+      "fact_verdicts": [
+        {
+          "id": 1,
+          "covered": false
+        }
+      ],
+      "reason": "The answer correctly identifies that the specific total dividend amount is not explicitly stated as a single line item in the provided context, although the context implies it via 'returned approximately $2.5 billion... primarily through dividends' and financing activities, the model fails to extract the specific $2,407 million figure which is likely derived from the cash flow statement details not fully present or explicitly labeled as 'dividends paid' in the snippet provided, leading to an abstention.",
+      "judge_model": "qwen/qwen3.8-27b",
+      "judge_failed": false
+    },
+    "search_query": "How much did Nike Inc pay in dividends (common and preferred) in fiscal 2026?"
+  },
+  {
+    "id": "q026",
+    "question_type": "multi-hop",
+    "question": "Why did NIKE Direct revenues decline in fiscal 2026 and which components fell?",
+    "failure_category": "generation_error",
+    "expected_answer": "Down 6% reported (8% currency-neutral) due to declines in NIKE Brand Digital sales of 12% (from $9.6 billion to $8.6 billion, driven by reduced traffic) and NIKE store sales of 4% ($9.1 billion vs $9.2 billion).",
+    "actual_answer": "Based on the provided context, NIKE Direct revenues in the North America segment decreased by 6% in fiscal 2026 [S2: Source: Nike-Inc-2026-10K.pdf, Page 40, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"]. This decline was driven by the following components:\n\n*   **Digital sales:** Decreased by 10% [S2: Source: Nike-Inc-2026-10K.pdf, Page 40, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"].\n*   **Store sales:** Decreased by 2% [S2: Source: Nike-Inc-2026-10K.pdf, Page 40, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"].\n\nAdditionally, comparable store sales decreased by 2% [S2: Source: Nike-Inc-2026-10K.pdf, Page 40, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"]. The context does not provide specific reasons for the decline in digital or store sales, only the magnitude of the decrease.\n\n[S2: Source: Nike-Inc-2026-10K.pdf, Page 40, Section: \"FISCAL 2026 COMPARED TO FISCAL 2025\"]",
+    "error": null,
+    "retrieval_metrics": {
+      "hit@1": 1.0,
+      "recall@1": 1.0,
+      "precision@1": 1.0,
+      "ndcg@1": 1.0,
+      "hit@3": 1.0,
+      "recall@3": 1.0,
+      "precision@3": 0.6666666666666666,
+      "ndcg@3": 1.0,
+      "hit@5": 1.0,
+      "recall@5": 1.0,
+      "precision@5": 0.6,
+      "ndcg@5": 1.0,
+      "hit@10": 1.0,
+      "recall@10": 1.0,
+      "precision@10": 0.6,
+      "ndcg@10": 1.0,
+      "hit@ctx": 1.0,
+      "recall@ctx": 1.0,
+      "precision@ctx": 0.6,
+      "ndcg@ctx": 1.0,
+      "mrr": 1.0
+    },
+    "answer_quality": {
+      "correctness": 0.0,
+      "faithfulness": 1.0,
+      "relevancy": 1.0,
+      "abstained": false,
+      "partially_abstained": false,
+      "unsupported_claims": [],
+      "fact_verdicts": [
+        {
+          "id": 1,
+          "covered": false
+        }
+      ],
+      "reason": "The generated answer provides specific percentage declines for digital and store sales that contradict the expected facts (10% vs 12% and 2% vs 4%), although it correctly identifies the overall 6% decline.",
+      "judge_model": "qwen/qwen3.8-27b",
+      "judge_failed": false
+    },
+    "search_query": "Why did Nike Inc NIKE Direct revenues decline in fiscal 2026 and which components fell?"
+  }
+]

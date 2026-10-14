@@ -7,5 +7,16 @@ qdrant-client
 fastembed
 tiktoken
 rank-bm25
+sentence-transformers
 streamlit
 requests
+flashrank 
+logfire 
+pydantic-settings
+requests
+rank-bm25
+langsmith
+langgraph
+langchain-community 
+pip install 'logfire[httpx]'
+pip install 'logfire[fastapi]'
