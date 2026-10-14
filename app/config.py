@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     QDRANT_URL: str | None = None
     QDRANT_API_KEY: str | None = None
     QDRANT_STORAGE_PATH: str = "data/qdrant_storage"
-    BM25_MANIFEST_PATH: str = "data/chunks_manifest.json"
+    BM25_MANIFEST_PATH: str = "data/manifests"
     
     RETRIEVAL_K: int = 30
-    FINAL_TOP_K: int = 4
+    FINAL_TOP_K: int = 6
     RRF_K: int = 60
     MAX_HISTORY_TURNS: int = 6
     MAX_CONTEXT_TOKENS: int = 2048

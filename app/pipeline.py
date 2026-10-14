@@ -24,7 +24,7 @@ from app.utils.flashrank_reranker import FlashRankReranker
 logger = logging.getLogger(__name__)
 
 RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "30"))
-FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "5"))
+FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "6"))
 MAX_FINAL_TOP_K = int(os.getenv("MAX_FINAL_TOP_K", "12"))
 MIN_STRICT_YIELD = int(os.getenv("MIN_STRICT_YIELD", "5"))
 CATALOG_TTL_S = int(os.getenv("CATALOG_TTL_S", "300"))
@@ -319,6 +319,23 @@ Natural Conversation Summary:"""
                 missing.append(entity)
                 continue
             entity_filters[entity] = build_filters(plan.years, entity if (entity and not doc_ids) else None, doc_ids)
+
+        if not entity_filters:
+            requested_entities = ", ".join(missing) or "the requested company"
+            answer = (
+                f"I couldn't find financial documents for {requested_entities}. "
+                "Check the company name and then try again."
+            )
+            total_duration = round(time.perf_counter() - t0, 2)
+            root_span.set_attribute("total_duration_s", total_duration)
+            return ChatResponse(
+                session_id=request.session_id,
+                answer=answer,
+                intent=plan.intent,
+                search_query=plan.search_query,
+                state=plan.state,
+                retrieved_chunks=[],
+            )
 
         sub_queries = [sq for sq in plan.sub_queries if sq.entity in entity_filters]
         if not sub_queries:
