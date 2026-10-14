@@ -25,6 +25,11 @@ MAX_TOKENS = 2048
 MIN_ALNUM_CHARS = 10
 
 _SEPARATOR_ROW = re.compile(r"^\|?[\s:\-|]+\|?$")
+_SERIALIZED_TABLE_CELL = re.compile(
+    r"(?P<label>[^=]+?),\s*YEAR ENDED MAY 31,\.?\s*(?P<year>20\d{2})\s*=\s*"
+    r"(?P<value>.*?)(?=(?:\.\s*)?[A-Z][^=]{0,120}?,\s*YEAR ENDED MAY 31,\.?\s*20\d{2}\s*=|$)",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -41,41 +46,119 @@ class DocumentChunk:
     metadata: Dict = field(default_factory=dict)
 
 
-def extract_table_structure(text: str) -> Dict[str, List[str]]:
-    """Extracts column headers and non-numeric row labels from a markdown table."""
-    lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.startswith("|") and not _SEPARATOR_ROW.match(line)
-    ]
-    if not lines:
-        return {"columns": [], "row_labels": []}
-
+def extract_serialized_table_rows(text: str) -> List[Dict[str, str]]:
     rows = []
-    for line in lines:
-        parts = line.split("|")
-        # Standard markdown table lines have leading and trailing empty elements
-        cells = [c.strip() for c in (parts[1:-1] if len(parts) > 2 else parts)]
-        if any(cells):
-            rows.append(cells)
+    current_section = ""
+    for match in _SERIALIZED_TABLE_CELL.finditer(text):
+        label = match.group("label").strip(" .:;,\t\r\n")
+        value = match.group("value").strip(" .\t\r\n")
+        year = match.group("year")
+        if not label:
+            continue
 
-    if not rows:
-        return {"columns": [], "row_labels": []}
+        if label.endswith(":") or not value:
+            current_section = label.rstrip(":").strip()
+            continue
 
-    columns = [c for c in rows[0] if c]
+        normalized_label = label
+        if label.casefold() in {"basic", "diluted"} and current_section:
+            section_key = current_section.casefold()
+            if "earnings per common share" in section_key:
+                normalized_label = f"{label.capitalize()} earnings per share"
+            elif "weighted average common shares outstanding" in section_key:
+                normalized_label = f"{label.capitalize()} weighted average common shares outstanding"
+        else:
+            current_section = ""
 
-    # Collect row labels across cells (handles indented/nested row headers)
+        rows.append({"metric": normalized_label, "year": year, "value": value})
+    return rows
+
+
+def extract_table_structure(text: str) -> Dict[str, List[str]]:
+    """Robustly extracts column headers and row labels from markdown or serialized table text."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    
+    columns = []
     row_labels = []
-    for r in rows[1:]:
-        row_label = None
-        for cell in r:
-            if cell and not re.match(r"^[\d\s.,$()%–\-+]+$", cell):
-                row_label = cell
-                break
-        if row_label and row_label not in row_labels:
-            row_labels.append(row_label)
 
-    return {"columns": columns[:15], "row_labels": row_labels[:30]}
+    # Check if table is in Markdown pipe format
+    pipe_lines = [l for l in lines if l.startswith("|") and not _SEPARATOR_ROW.match(l)]
+    if pipe_lines:
+        for idx, line in enumerate(pipe_lines):
+            parts = [c.strip() for c in line.split("|")[1:-1]]
+            parts = [p for p in parts if p]
+            if not parts:
+                continue
+            if idx == 0:
+                columns = parts[:15]
+            else:
+                # First non-numeric cell is typically the row label/metric
+                for cell in parts:
+                    if cell and not re.match(r"^[\d\s.,$()%–\-+]+$", cell):
+                        if cell not in row_labels:
+                            row_labels.append(cell)
+                        break
+    else:
+        rows = extract_serialized_table_rows(text)
+        row_labels = list(dict.fromkeys(row["metric"] for row in rows))
+        columns = list(dict.fromkeys(row["year"] for row in rows))
+
+    return {"columns": columns[:15], "row_labels": row_labels[:40]}
+
+
+def build_table_fact_chunks(
+    rows: List[Dict[str, str]],
+    doc_id: str,
+    parent_chunk_id: str,
+    page_number: Optional[int],
+    headings: List[str],
+    source_file: str,
+) -> List[DocumentChunk]:
+    facts = []
+    section = " > ".join(headings)
+    for row in rows:
+        metric = row["metric"]
+        year = row["year"]
+        value = row["value"]
+        content = (
+            f"{doc_id}: {metric}, fiscal year ended May 31, {year} = {value}"
+            f"{' per share' if 'earnings per share' in metric.casefold() else ''}."
+        )
+        embedding_parts = [f"Document: {doc_id}"]
+        if page_number:
+            embedding_parts.append(f"Page: {page_number}")
+        if section:
+            embedding_parts.append(f"Section: {section}")
+        embedding_parts.extend(
+            [f"Financial metric: {metric}", f"Fiscal year: {year}", content]
+        )
+        fact_id = hashlib.sha256(
+            f"{parent_chunk_id}:{metric}:{year}:{value}".encode()
+        ).hexdigest()[:16]
+        facts.append(
+            DocumentChunk(
+                chunk_id=fact_id,
+                document_id=doc_id,
+                content=content,
+                embedding_text="\n".join(embedding_parts),
+                chunk_type="table_fact",
+                page_number=page_number,
+                headings=headings,
+                source_file=source_file,
+                metadata={
+                    "page_numbers": [page_number] if page_number else [],
+                    "columns": [year],
+                    "row_labels": [metric],
+                    "is_financial_table": True,
+                    "is_financial_fact": True,
+                    "financial_metric": metric,
+                    "fiscal_year": int(year),
+                    "financial_value": value,
+                    "parent_chunk_id": parent_chunk_id,
+                },
+            )
+        )
+    return facts
 
 
 class FastDoclingChunker:
@@ -128,7 +211,14 @@ class FastDoclingChunker:
 
         final_chunks: List[DocumentChunk] = []
         for idx, raw in enumerate(raw_chunks):
+            # Export raw item or text to markdown if it's a table
             text = (raw.text or "").strip()
+            if hasattr(raw, "export_to_markdown"):
+                try:
+                    text = raw.export_to_markdown() or text
+                except Exception:
+                    pass
+
             headings = list(getattr(raw.meta, "headings", []) or [])
 
             labels = [
@@ -136,7 +226,7 @@ class FastDoclingChunker:
                 for i in getattr(raw.meta, "doc_items", []) or []
                 if getattr(i, "label", None)
             ]
-            chunk_type = "table" if any("table" in l for l in labels) else "text"
+            chunk_type = "table" if any("table" in l for l in labels) or "|" in text or "=" in text else "text"
 
             if not text:
                 continue
@@ -153,7 +243,7 @@ class FastDoclingChunker:
             )
             page_num = pages[0] if pages else None
 
-            table_info = extract_table_structure(text) if chunk_type == "table" else {}
+            table_info = extract_table_structure(text) if chunk_type == "table" else {"columns": [], "row_labels": []}
 
             emb_parts = []
             if self.doc_title:
@@ -164,7 +254,7 @@ class FastDoclingChunker:
                 emb_parts.append(f"Section: {' > '.join(headings)}")
             if chunk_type == "table":
                 if table_info.get("columns"):
-                    emb_parts.append(f"Table Columns: {', '.join(table_info['columns'])}")
+                    emb_parts.append(f"Table Columns / Years: {', '.join(table_info['columns'])}")
                 if table_info.get("row_labels"):
                     emb_parts.append(f"Table Metrics: {'; '.join(table_info['row_labels'])}")
 
@@ -176,8 +266,7 @@ class FastDoclingChunker:
                 f"{doc_id}:{idx}:{text}".encode()
             ).hexdigest()[:16]
 
-            final_chunks.append(
-                DocumentChunk(
+            table_chunk = DocumentChunk(
                     chunk_id=chunk_id,
                     document_id=doc_id,
                     content=text,
@@ -193,7 +282,18 @@ class FastDoclingChunker:
                         "is_financial_table": chunk_type == "table",
                     },
                 )
-            )
+            final_chunks.append(table_chunk)
+            if chunk_type == "table":
+                final_chunks.extend(
+                    build_table_fact_chunks(
+                        extract_serialized_table_rows(text),
+                        doc_id=doc_id,
+                        parent_chunk_id=chunk_id,
+                        page_number=page_num,
+                        headings=headings,
+                        source_file=pdf_path.name,
+                    )
+                )
 
         return final_chunks, doc.export_to_markdown()
 
@@ -220,7 +320,7 @@ def run_pipeline(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process PDF using Docling chunker")
+    parser = argparse.ArgumentParser(description="Process PDF using robust Docling chunker")
     parser.add_argument("--pdf", required=True, help="Path to input PDF file")
     parser.add_argument("--doc-id", required=True, help="Document ID name")
     parser.add_argument("--out-dir", default="data", help="Output directory")

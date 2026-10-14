@@ -86,6 +86,7 @@ def seed_database(
             "content": chunk.get("content", ""),
             "embedding_text": chunk.get("embedding_text", ""),
             "page_number": chunk.get("page_number"),
+            "fiscal_year": chunk.get("fiscal_year") or chunk.get("metadata", {}).get("fiscal_year"),
             "headings": chunk.get("headings", []),
             "chunk_type": chunk.get("chunk_type", "text"),
             "metadata": chunk.get("metadata", {}),

@@ -18,5 +18,5 @@ rank-bm25
 langsmith
 langgraph
 langchain-community 
-pip install 'logfire[httpx]'
-pip install 'logfire[fastapi]'
+logfire[httpx]
+logfire[fastapi]
