@@ -20,10 +20,10 @@ class Settings(BaseSettings):
     BM25_MANIFEST_PATH: str = "data/manifests"
     
     RETRIEVAL_K: int = 30
-    FINAL_TOP_K: int = 6
+    FINAL_TOP_K: int = 10
     RRF_K: int = 60
     MAX_HISTORY_TURNS: int = 6
-    MAX_CONTEXT_TOKENS: int = 2048
+    MAX_CONTEXT_TOKENS: int = 4096
 
     class Config:
         env_file = ".env"

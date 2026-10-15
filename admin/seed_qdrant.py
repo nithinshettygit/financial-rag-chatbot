@@ -1,5 +1,6 @@
-# admin/seed_qdrant.py
+import argparse
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Union
@@ -54,12 +55,19 @@ def seed_database(
         )
 
     # Payload indexes for metadata filtering
-    for field_name in ["document_id", "chunk_type"]:
+    index_fields = [
+        ("document_id", models.PayloadSchemaType.KEYWORD),
+        ("chunk_type", models.PayloadSchemaType.KEYWORD),
+        ("company", models.PayloadSchemaType.KEYWORD),
+        ("fiscal_year", models.PayloadSchemaType.INTEGER),
+        ("fiscal_years", models.PayloadSchemaType.INTEGER),
+    ]
+    for field_name, schema in index_fields:
         try:
             client.create_payload_index(
                 collection_name=COLLECTION_NAME,
                 field_name=field_name,
-                field_schema=models.PayloadSchemaType.KEYWORD,
+                field_schema=schema,
                 wait=True,
             )
         except Exception:
@@ -79,6 +87,27 @@ def seed_database(
         point_id = _generate_deterministic_uuid(doc_id, chunk_id)
         point_ids_by_document.setdefault(doc_id, []).append(point_id)
 
+        meta = chunk.get("metadata", {})
+        
+        # Company inference fallback
+        company = chunk.get("company") or meta.get("company")
+        if not company:
+            lower_doc = doc_id.lower()
+            if "nike" in lower_doc:
+                company = "Nike"
+            elif "duolingo" in lower_doc:
+                company = "Duolingo"
+
+        fiscal_year = chunk.get("fiscal_year") or meta.get("fiscal_year")
+        fiscal_years = chunk.get("fiscal_years") or meta.get("fiscal_years") or []
+        if not fiscal_year and not fiscal_years:
+            src_str = f"{doc_id} {chunk.get('source_file', '')}"
+            y_match = re.search(r"20\d{2}", src_str)
+            if y_match:
+                inferred_year = int(y_match.group(0))
+                fiscal_year = inferred_year
+                fiscal_years = [inferred_year]
+
         payload = {
             "chunk_id": chunk_id,
             "document_id": doc_id,
@@ -86,11 +115,15 @@ def seed_database(
             "content": chunk.get("content", ""),
             "embedding_text": chunk.get("embedding_text", ""),
             "page_number": chunk.get("page_number"),
-            "fiscal_year": chunk.get("fiscal_year") or chunk.get("metadata", {}).get("fiscal_year"),
+            "fiscal_year": fiscal_year,
+            "fiscal_years": fiscal_years,
             "headings": chunk.get("headings", []),
             "chunk_type": chunk.get("chunk_type", "text"),
-            "metadata": chunk.get("metadata", {}),
-            "company": chunk.get("company") or chunk.get("metadata", {}).get("company"),
+            "columns": meta.get("columns", []),
+            "row_labels": meta.get("row_labels", []),
+            "financial_metric": meta.get("financial_metric") or chunk.get("financial_metric"),
+            "metadata": meta,
+            "company": company,
         }
 
         points.append(
@@ -135,4 +168,49 @@ def seed_database(
                 ),
             )
 
+    client.close()
     return len(points)
+
+
+def seed_all_manifests(
+    manifest_dir: Union[str, Path] = BASE_DIR / "data" / "manifests",
+    storage_path: str = DEFAULT_QDRANT_PATH,
+    recreate_collection: bool = False,
+) -> int:
+    manifest_dir = Path(manifest_dir)
+    manifest_files = [
+        f for f in manifest_dir.glob("*.json")
+        if not f.name.startswith("old_") and "_old" not in f.name and not f.name.endswith(".bak") and "cache" not in f.name
+    ]
+    total_indexed = 0
+    first = True
+    for mf in sorted(manifest_files):
+        print(f"Seeding {mf.name} into Qdrant...")
+        count = seed_database(
+            manifest_path=mf,
+            storage_path=storage_path,
+            recreate_collection=(recreate_collection and first),
+        )
+        first = False
+        total_indexed += count
+        print(f"  -> Indexed {count} vectors from {mf.name}")
+    return total_indexed
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Seed Qdrant vector database from manifests")
+    parser.add_argument("--manifest", help="Path to single manifest file to seed")
+    parser.add_argument("--all", action="store_true", help="Seed all active manifests in data/manifests/")
+    parser.add_argument("--recreate", action="store_true", help="Recreate collection before seeding")
+    args = parser.parse_args()
+
+    if args.manifest:
+        cnt = seed_database(args.manifest, recreate_collection=args.recreate)
+        print(f"Successfully seeded {cnt} vectors from {args.manifest}")
+    elif args.all:
+        cnt = seed_all_manifests(recreate_collection=args.recreate)
+        print(f"Successfully seeded total {cnt} vectors across all manifests")
+    else:
+        # Default: seed all manifests if no arg passed
+        cnt = seed_all_manifests(recreate_collection=args.recreate)
+        print(f"Successfully seeded total {cnt} vectors across all manifests")

@@ -24,7 +24,7 @@ from app.utils.flashrank_reranker import FlashRankReranker
 logger = logging.getLogger(__name__)
 
 RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "30"))
-FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "6"))
+FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "10"))
 MAX_FINAL_TOP_K = int(os.getenv("MAX_FINAL_TOP_K", "12"))
 MIN_STRICT_YIELD = int(os.getenv("MIN_STRICT_YIELD", "5"))
 CATALOG_TTL_S = int(os.getenv("CATALOG_TTL_S", "300"))
@@ -97,6 +97,30 @@ async def get_catalog(force: bool = False) -> List[Dict[str, Any]]:
     if force or time.time() - _catalog["ts"] > CATALOG_TTL_S:
         try:
             docs = await asyncio.to_thread(lambda: get_vector().list_documents())
+            if not docs:
+                # Fallback to local manifests if Qdrant is warming up or empty
+                bm_chunks = get_bm25().valid_chunks
+                manifest_docs = {}
+                for c in bm_chunks:
+                    doc_id = c.get("document_id") or "doc_default"
+                    src = c.get("source_file") or f"{doc_id}.pdf"
+                    comp = c.get("company") or (c.get("metadata") or {}).get("company") or ""
+                    if not comp:
+                        lower_name = f"{doc_id} {src}".lower()
+                        if "nike" in lower_name:
+                            comp = "Nike"
+                        elif "duolingo" in lower_name:
+                            comp = "Duolingo"
+                    key = (doc_id, src)
+                    if key not in manifest_docs:
+                        manifest_docs[key] = {
+                            "document_id": doc_id,
+                            "source_file": src,
+                            "company": comp,
+                            "chunk_count": 0,
+                        }
+                    manifest_docs[key]["chunk_count"] += 1
+                docs = list(manifest_docs.values())
             _catalog.update(ts=time.time(), docs=docs)
         except Exception:
             logfire.exception("Catalog refresh failed; using stale copy")
@@ -114,8 +138,9 @@ def resolve_document_ids(entity: Optional[str], document_id: Optional[str], cata
         return None
     matches = []
     for d in catalog:
-        indexed = company_key(f"{d.get('company', '')} {d['document_id']} {d['source_file']}")
-        if f" {key} " in f" {indexed} ":
+        comp = company_key(d.get("company", ""))
+        indexed = company_key(f"{d.get('company', '')} {d.get('document_id', '')} {d.get('source_file', '')}")
+        if key == comp or f" {key} " in f" {indexed} " or key in comp or comp in key:
             matches.append(str(d["document_id"]))
     return list(dict.fromkeys(matches))
 
@@ -202,10 +227,12 @@ def build_context(
         doc_id = item.get("document_id", "Doc")
         source_file = item.get("source_file") or f"{doc_id}.pdf"
         page = item.get("page_number", "N/A")
+        chunk_type = item.get("chunk_type", "text")
         headings = " > ".join(item.get("headings") or []) or "Main Section"
 
         source_id = f"S{len(selected) + 1}"
-        part = f"[{source_id}]\nFile: {source_file} | Page: {page}\nSection: {headings}\nContent:\n{content}"
+        type_tag = f" | Type: {chunk_type.upper()}" if chunk_type != "text" else ""
+        part = f"[{source_id}]{type_tag}\nFile: {source_file} | Page: {page}\nSection: {headings}\nContent:\n{content}"
         cost = count_tokens(part) + sep_tokens
         if used + cost > max_tokens:
             continue
@@ -362,7 +389,18 @@ Natural Conversation Summary:"""
                 intent=plan.intent, search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
             )
 
-        system_prompt = f"You are a precise financial QA assistant. Answer the user query accurately using ONLY the context provided below.\nCONTEXT:\n{context}"
+        system_prompt = (
+            "You are a precise, professional financial QA assistant. Answer the user query accurately and comprehensively using ONLY the context provided below.\n\n"
+            "Guidelines:\n"
+            "1. Tabular & Multi-Year Facts: When data is given as 'Document: Metric | Column = Value | ...', extract the exact figures for each requested year.\n"
+            "2. Multi-Year Comparisons: If the user asks for changes, growth rates, or comparisons over time, calculate and state the difference clearly based on the provided numbers.\n"
+            "3. Units & Scale: State monetary units accurately (e.g. in millions, thousands, or percentages as specified in the context).\n"
+            "4. Citations: Cite your sources using passage tags like [S1], [S2] where applicable.\n"
+            "5. Grounding: Rely strictly on the context. If figures for a requested year or metric are not present, explicitly state that they are unavailable.\n\n"
+            f"CONTEXT:\n{context}"
+        )
+
+        user_content = request.query if request.query.strip() == plan.search_query.strip() else f"{request.query}\n(Retrieval focus: {plan.search_query})"
 
         # --- Developer Observability: Attach Retrieved Chunk Manifests to LLM Span ---
         with logfire.span("LLM Generation (Groq)", model=settings.LLM_MODEL) as llm_span:
@@ -379,7 +417,7 @@ Natural Conversation Summary:"""
                     model=settings.LLM_MODEL,
                     messages=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": plan.search_query},
+                        {"role": "user", "content": user_content},
                     ],
                     temperature=0.0,
                 )

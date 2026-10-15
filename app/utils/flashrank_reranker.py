@@ -19,13 +19,29 @@ class FlashRankReranker:
             headings = " > ".join(item.get("headings") or [])
             content = (item.get("content") or "").strip()
             metadata = item.get("metadata") or {}
-            row_labels = "; ".join(str(r) for r in metadata.get("row_labels") or [])
+            chunk_type = item.get("chunk_type", "text")
             
             text_parts = []
             if headings:
                 text_parts.append(f"Section: {headings}")
-            if item.get("chunk_type") == "table" and row_labels:
-                text_parts.append(f"Table Rows: {row_labels}")
+
+            if chunk_type in ("table", "table_fact"):
+                metric = metadata.get("financial_metric") or item.get("financial_metric")
+                if metric:
+                    text_parts.append(f"Financial Metric: {metric}")
+                
+                years = metadata.get("fiscal_years") or item.get("fiscal_years") or []
+                if years:
+                    text_parts.append(f"Fiscal Years: {', '.join(str(y) for y in years)}")
+                
+                cols = metadata.get("columns") or item.get("columns") or []
+                if cols:
+                    text_parts.append(f"Table Columns: {', '.join(str(c) for c in cols[:10])}")
+
+                row_labels = "; ".join(str(r) for r in (metadata.get("row_labels") or item.get("row_labels") or []))
+                if row_labels and not metric:
+                    text_parts.append(f"Table Rows: {row_labels}")
+
             text_parts.append(f"Content: {content}")
             
             passages.append({
@@ -34,15 +50,21 @@ class FlashRankReranker:
                 "meta": item
             })
 
-        request = RerankRequest(query=query, passages=passages)
-        results = self.ranker.rerank(request)
+        try:
+            request = RerankRequest(query=query, passages=passages)
+            results = self.ranker.rerank(request)
 
-        reranked_output = []
-        for res in results[:top_k]:
-            original_item = res["meta"]
-            score = float(res["score"])
-            original_item["final_score"] = score
-            original_item["rerank_score"] = score
-            reranked_output.append(original_item)
+            reranked_output = []
+            for res in results[:top_k]:
+                original_item = res["meta"]
+                score = float(res["score"])
+                original_item["final_score"] = score
+                original_item["rerank_score"] = score
+                reranked_output.append(original_item)
 
-        return reranked_output
+            return reranked_output
+        except Exception as e:
+            logfire.warning(f"FlashRank reranking failed, falling back to initial ranking: {e}")
+            for c in candidates[:top_k]:
+                c.setdefault("final_score", c.get("rrf_score", c.get("score", 0.0)))
+            return candidates[:top_k]
