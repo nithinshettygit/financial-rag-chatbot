@@ -20,3 +20,4 @@ langgraph
 langchain-community 
 logfire[httpx]
 logfire[fastapi]
+deepeval

@@ -27,7 +27,7 @@ from app.config import settings
 # ============================================================
 # CONFIGURATION & LOGGING SETUP
 # ============================================================
-DATASET_PATH = Path("evaluation/dataset/ragas_dataset_cleaned.json")
+DATASET_PATH = Path("evaluation/dataset/ragas_dataset_cleaned_all.json")
 CACHE_PATH = Path("ragas_samples_cache.json")
 REPORT_PATH = Path("ragas_evaluation_report.csv")
 
