@@ -122,6 +122,7 @@ with tab_pdf:
                             "path": str(manifest_path),
                             "total_chunks": len(chunks),
                             "table_chunks": sum(1 for c in chunks if c.chunk_type == "table"),
+                            "table_facts": sum(1 for c in chunks if c.chunk_type == "table_fact"),
                             "text_chunks": sum(1 for c in chunks if c.chunk_type == "text"),
                         }
                         st.success(f"Successfully parsed {len(chunks)} chunks!")
@@ -147,7 +148,7 @@ with tab_pdf:
                 if info.get("doc_id") == doc_id:
                     st.info(
                         f"**Parsed Summary:** {info['total_chunks']} total chunks "
-                        f"({info['table_chunks']} tables, {info['text_chunks']} text blocks) "
+                        f"({info['table_chunks']} table blocks, {info.get('table_facts', 0)} multi-year table facts, {info['text_chunks']} text blocks) "
                         f"| Saved to `{Path(info['path']).name}`"
                     )
 
@@ -188,9 +189,13 @@ with tab_manifest:
             )
 
         if manifest_chunks:
+            table_fact_count = sum(1 for c in manifest_chunks if c.get("chunk_type") == "table_fact")
             table_count = sum(1 for c in manifest_chunks if c.get("chunk_type") == "table")
             text_count = sum(1 for c in manifest_chunks if c.get("chunk_type") == "text")
-            st.info(f"**Manifest Preview:** {len(manifest_chunks)} total chunks ({table_count} tables, {text_count} text blocks).")
+            st.info(
+                f"**Manifest Preview:** {len(manifest_chunks)} total chunks "
+                f"({table_count} table blocks, {table_fact_count} multi-year table facts, {text_count} text blocks)."
+            )
 
             if st.button("Seed Qdrant from Uploaded Manifest", key="seed_from_manifest_btn"):
                 # Save uploaded manifest locally to manifests dir for persistence

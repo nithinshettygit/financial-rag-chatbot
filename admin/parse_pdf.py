@@ -6,7 +6,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from transformers import AutoTokenizer
 from docling.chunking import HybridChunker
@@ -16,20 +16,19 @@ from docling.datamodel.pipeline_options import (
     PdfPipelineOptions,
 )
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling_core.transforms.chunker.tokenizer.huggingface import (
-    HuggingFaceTokenizer,
-)
+from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-MAX_TOKENS = 2048
-MIN_ALNUM_CHARS = 10
+# Strict 500 token limit to guarantee safe bounds within BGE-small-en-v1.5 (512 token ceiling)
+MAX_EMBEDDING_TOKENS = 500
+MIN_TEXT_CHARS = 35
+MIN_TEXT_WORDS = 6
 
-_SEPARATOR_ROW = re.compile(r"^\|?[\s:\-|]+\|?$")
-_SERIALIZED_TABLE_CELL = re.compile(
-    r"(?P<label>[^=]+?),\s*YEAR ENDED MAY 31,\.?\s*(?P<year>20\d{2})\s*=\s*"
-    r"(?P<value>.*?)(?=(?:\.\s*)?[A-Z][^=]{0,120}?,\s*YEAR ENDED MAY 31,\.?\s*20\d{2}\s*=|$)",
-    re.IGNORECASE,
+_CELL_SPLIT = re.compile(
+    r"\.(?!\d)\s+(?=[A-Za-z0-9][^=,]{0,100}?,\s*[^=]{1,80}?=)"
 )
+_YEAR_RE = re.compile(r"20\d{2}")
+_SEPARATOR_ROW = re.compile(r"^\|?[\s:\-|]+\|?$")
 
 
 @dataclass
@@ -43,122 +42,178 @@ class DocumentChunk:
     headings: List[str] = field(default_factory=list)
     table_caption: Optional[str] = None
     source_file: Optional[str] = None
-    metadata: Dict = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def extract_serialized_table_rows(text: str) -> List[Dict[str, str]]:
-    rows = []
-    current_section = ""
-    for match in _SERIALIZED_TABLE_CELL.finditer(text):
-        label = match.group("label").strip(" .:;,\t\r\n")
-        value = match.group("value").strip(" .\t\r\n")
-        year = match.group("year")
-        if not label:
-            continue
-
-        if label.endswith(":") or not value:
-            current_section = label.rstrip(":").strip()
-            continue
-
-        normalized_label = label
-        if label.casefold() in {"basic", "diluted"} and current_section:
-            section_key = current_section.casefold()
-            if "earnings per common share" in section_key:
-                normalized_label = f"{label.capitalize()} earnings per share"
-            elif "weighted average common shares outstanding" in section_key:
-                normalized_label = f"{label.capitalize()} weighted average common shares outstanding"
-        else:
-            current_section = ""
-
-        rows.append({"metric": normalized_label, "year": year, "value": value})
-    return rows
+def clean_year(col_str: str) -> Optional[int]:
+    match = _YEAR_RE.search(col_str)
+    return int(match.group(0)) if match else None
 
 
-def extract_table_structure(text: str) -> Dict[str, List[str]]:
-    """Robustly extracts column headers and row labels from markdown or serialized table text."""
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    
-    columns = []
-    row_labels = []
+def parse_cell_left(left: str) -> Tuple[str, str]:
+    """Separates metric name from column header in serialized key-value table cells."""
+    m = re.search(
+        r",\s*((?:YEAR ENDED\s+(?:MAY|DECEMBER|JANUARY|JUNE|SEPTEMBER)\s+\d{1,2}|MAY\s+\d{1,2}|DECEMBER\s+\d{1,2}|FISCAL|FOR\s+THE\s+|AVERAGE\s+|AT\s+|AS\s+OF\s+)?[\s.,]*(?:20\d{2}|NUMBER|1|% CHANGE[^\s=]*|[A-Z0-9\s/–\-\.()]+?))$",
+        left,
+        re.IGNORECASE,
+    )
+    if m:
+        metric = left[: m.start()].strip(" .:;\t\r\n")
+        col = m.group(1).strip(" .:;\t\r\n")
+        col = re.sub(r"^[.\s]+", "", col)
+        col = col.replace(".20", " 20")
+        return metric, col
+    elif "," in left:
+        metric, col = left.rsplit(",", 1)
+        return metric.strip(" .:;\t\r\n"), col.strip(" .:;\t\r\n")
+    return left.strip(), ""
 
-    # Check if table is in Markdown pipe format
+
+def extract_structured_table(text: str) -> Tuple[List[str], Dict[str, Dict[str, str]]]:
+    """Universal robust parser: handles both Markdown pipe tables and serialized table strings."""
+    rows_by_metric: Dict[str, Dict[str, str]] = {}
+    cols_order: List[str] = []
+
+    # 1. Pipe-separated Markdown Table
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
     pipe_lines = [l for l in lines if l.startswith("|") and not _SEPARATOR_ROW.match(l)]
     if pipe_lines:
-        for idx, line in enumerate(pipe_lines):
+        header_parts = [c.strip() for c in pipe_lines[0].split("|")[1:-1]]
+        cols_order = [p for p in header_parts[1:] if p]
+        for line in pipe_lines[1:]:
             parts = [c.strip() for c in line.split("|")[1:-1]]
-            parts = [p for p in parts if p]
             if not parts:
                 continue
-            if idx == 0:
-                columns = parts[:15]
-            else:
-                # First non-numeric cell is typically the row label/metric
-                for cell in parts:
-                    if cell and not re.match(r"^[\d\s.,$()%–\-+]+$", cell):
-                        if cell not in row_labels:
-                            row_labels.append(cell)
-                        break
-    else:
-        rows = extract_serialized_table_rows(text)
-        row_labels = list(dict.fromkeys(row["metric"] for row in rows))
-        columns = list(dict.fromkeys(row["year"] for row in rows))
+            metric = parts[0]
+            if not metric or re.match(r"^[\d\s.,$()%–\-+]+$", metric):
+                continue
+            rows_by_metric[metric] = {}
+            for col_idx, val in enumerate(parts[1:]):
+                if col_idx < len(cols_order):
+                    rows_by_metric[metric][cols_order[col_idx]] = val
+        return cols_order, rows_by_metric
 
-    return {"columns": columns[:15], "row_labels": row_labels[:40]}
+    # 2. Serialized format: Metric, Col = Val
+    cells = _CELL_SPLIT.split(text)
+    for c in cells:
+        c = c.strip(" .\t\r\n")
+        if "=" not in c:
+            continue
+        parts = c.split("=", 1)
+        left = parts[0].strip()
+        val = parts[1].strip(" .\t\r\n")
+        if val.endswith(".") and not re.search(r"\d\.\d", val[-3:]):
+            val = val[:-1].strip()
+
+        metric, col = parse_cell_left(left)
+        if not metric or len(metric) < 2 or metric.startswith("%") or metric.isdigit():
+            continue
+        if not col:
+            continue
+
+        if col not in cols_order:
+            cols_order.append(col)
+
+        if metric not in rows_by_metric:
+            rows_by_metric[metric] = {}
+        rows_by_metric[metric][col] = val
+
+    return cols_order, rows_by_metric
 
 
-def build_table_fact_chunks(
-    rows: List[Dict[str, str]],
+def build_multiyear_fact_chunks(
+    rows_by_metric: Dict[str, Dict[str, str]],
     doc_id: str,
     parent_chunk_id: str,
     page_number: Optional[int],
     headings: List[str],
     source_file: str,
 ) -> List[DocumentChunk]:
+    """Generates atomic multi-year row facts preserving all columns/years together."""
     facts = []
     section = " > ".join(headings)
-    for row in rows:
-        metric = row["metric"]
-        year = row["year"]
-        value = row["value"]
-        content = (
-            f"{doc_id}: {metric}, fiscal year ended May 31, {year} = {value}"
-            f"{' per share' if 'earnings per share' in metric.casefold() else ''}."
-        )
-        embedding_parts = [f"Document: {doc_id}"]
+
+    for metric, row_data in rows_by_metric.items():
+        non_empty = {k: v for k, v in row_data.items() if v and v.strip()}
+        if not non_empty:
+            continue
+
+        years = [clean_year(c) for c in non_empty.keys() if clean_year(c)]
+        years = sorted(set(years))
+
+        # Consolidated Multi-Year Row Fact (Primary retrieval target)
+        val_pairs = [f"{col} = {val}" for col, val in non_empty.items()]
+        content = f"{doc_id}: {metric} | " + " | ".join(val_pairs) + "."
+
+        emb_parts = [f"Document: {doc_id}"]
         if page_number:
-            embedding_parts.append(f"Page: {page_number}")
+            emb_parts.append(f"Page: {page_number}")
         if section:
-            embedding_parts.append(f"Section: {section}")
-        embedding_parts.extend(
-            [f"Financial metric: {metric}", f"Fiscal year: {year}", content]
-        )
+            emb_parts.append(f"Section: {section}")
+        emb_parts.append(f"Financial Metric: {metric}")
+        if years:
+            emb_parts.append(f"Fiscal Years: {', '.join(str(y) for y in years)}")
+        emb_parts.append(content)
+
         fact_id = hashlib.sha256(
-            f"{parent_chunk_id}:{metric}:{year}:{value}".encode()
+            f"{parent_chunk_id}:{metric}:multiyear".encode()
         ).hexdigest()[:16]
+
         facts.append(
             DocumentChunk(
                 chunk_id=fact_id,
                 document_id=doc_id,
                 content=content,
-                embedding_text="\n".join(embedding_parts),
+                embedding_text="\n".join(emb_parts),
                 chunk_type="table_fact",
                 page_number=page_number,
                 headings=headings,
                 source_file=source_file,
                 metadata={
                     "page_numbers": [page_number] if page_number else [],
-                    "columns": [year],
+                    "columns": list(non_empty.keys()),
                     "row_labels": [metric],
                     "is_financial_table": True,
                     "is_financial_fact": True,
                     "financial_metric": metric,
-                    "fiscal_year": int(year),
-                    "financial_value": value,
+                    "fiscal_years": years,
+                    "fiscal_year": max(years) if years else None,
+                    "values_by_column": non_empty,
                     "parent_chunk_id": parent_chunk_id,
                 },
             )
         )
+
     return facts
+
+
+def split_large_table_content(text: str, max_words_per_block: int = 120) -> List[str]:
+    """Splits large financial tables into bounded row blocks to prevent embedding truncation."""
+    cells = _CELL_SPLIT.split(text)
+    if len(cells) <= 12 or len(text.split()) <= max_words_per_block:
+        return [text]
+
+    blocks = []
+    current_block: List[str] = []
+    current_words = 0
+
+    for c in cells:
+        cell_str = c.strip(" .\t\r\n")
+        if not cell_str:
+            continue
+        c_words = len(cell_str.split())
+        if current_words + c_words > max_words_per_block and current_block:
+            blocks.append(". ".join(current_block) + ".")
+            current_block = [cell_str]
+            current_words = c_words
+        else:
+            current_block.append(cell_str)
+            current_words += c_words
+
+    if current_block:
+        blocks.append(". ".join(current_block) + ".")
+
+    return blocks if blocks else [text]
 
 
 class FastDoclingChunker:
@@ -171,12 +226,12 @@ class FastDoclingChunker:
 
         self.hf_tokenizer = AutoTokenizer.from_pretrained(
             embedding_model,
-            model_max_length=MAX_TOKENS,
+            model_max_length=MAX_EMBEDDING_TOKENS,
             truncation=True,
         )
         self.tokenizer = HuggingFaceTokenizer(
             tokenizer=self.hf_tokenizer,
-            max_tokens=MAX_TOKENS,
+            max_tokens=MAX_EMBEDDING_TOKENS,
         )
 
         pipeline_options = PdfPipelineOptions()
@@ -187,7 +242,7 @@ class FastDoclingChunker:
 
         self.chunker = HybridChunker(
             tokenizer=self.tokenizer,
-            max_tokens=MAX_TOKENS,
+            max_tokens=MAX_EMBEDDING_TOKENS,
             repeat_table_header=True,
             merge_peers=False,
         )
@@ -195,8 +250,8 @@ class FastDoclingChunker:
             format_options={"pdf": PdfFormatOption(pipeline_options=pipeline_options)}
         )
 
-    def _truncate(self, text: str, max_tokens: int = MAX_TOKENS) -> str:
-        """Safely truncates embedding text strings exceeding model sequence limit."""
+    def _truncate(self, text: str, max_tokens: int = MAX_EMBEDDING_TOKENS) -> str:
+        """Safely truncates text within the embedding model's sequence length."""
         ids = self.hf_tokenizer.encode(
             text, add_special_tokens=False, truncation=True, max_length=max_tokens
         )
@@ -210,9 +265,10 @@ class FastDoclingChunker:
         raw_chunks = list(self.chunker.chunk(dl_doc=doc))
 
         final_chunks: List[DocumentChunk] = []
+
         for idx, raw in enumerate(raw_chunks):
-            # Export raw item or text to markdown if it's a table
             text = (raw.text or "").strip()
+            # If doc item has markdown export capability, use it
             if hasattr(raw, "export_to_markdown"):
                 try:
                     text = raw.export_to_markdown() or text
@@ -220,7 +276,6 @@ class FastDoclingChunker:
                     pass
 
             headings = list(getattr(raw.meta, "headings", []) or [])
-
             labels = [
                 str(getattr(i, "label", "")).lower()
                 for i in getattr(raw.meta, "doc_items", []) or []
@@ -230,8 +285,17 @@ class FastDoclingChunker:
 
             if not text:
                 continue
-            if chunk_type != "table" and len([c for c in text if c.isalnum()]) < MIN_ALNUM_CHARS:
-                continue
+
+            # Filter out boilerplate / micro-chunk noise
+            if chunk_type != "table":
+                words = text.split()
+                if len(text) < MIN_TEXT_CHARS or len(words) < MIN_TEXT_WORDS:
+                    continue
+                # Skip SEC header/boilerplate single lines
+                if re.match(r"^\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}$", text.strip()):
+                    continue
+                if "IRS Employer Identification No" in text or "principal executive offices" in text:
+                    continue
 
             pages = sorted(
                 {
@@ -243,55 +307,92 @@ class FastDoclingChunker:
             )
             page_num = pages[0] if pages else None
 
-            table_info = extract_table_structure(text) if chunk_type == "table" else {"columns": [], "row_labels": []}
-
-            emb_parts = []
-            if self.doc_title:
-                emb_parts.append(f"Document: {self.doc_title}")
-            if page_num:
-                emb_parts.append(f"Page: {page_num}")
-            if headings:
-                emb_parts.append(f"Section: {' > '.join(headings)}")
             if chunk_type == "table":
-                if table_info.get("columns"):
-                    emb_parts.append(f"Table Columns / Years: {', '.join(table_info['columns'])}")
-                if table_info.get("row_labels"):
-                    emb_parts.append(f"Table Metrics: {'; '.join(table_info['row_labels'])}")
+                cols, structured_rows = extract_structured_table(text)
+                row_labels = list(structured_rows.keys())
+                col_labels = cols[:15]
 
-            emb_parts.append(text)
-            full_embedding_text = "\n".join(emb_parts)
-            embedding_text = self._truncate(full_embedding_text)
+                # Split large tables into bounded sub-blocks (< 500 tokens)
+                table_blocks = split_large_table_content(text)
+                for b_idx, block_text in enumerate(table_blocks):
+                    chunk_id = hashlib.sha256(
+                        f"{doc_id}:{idx}:block_{b_idx}:{block_text}".encode()
+                    ).hexdigest()[:16]
 
-            chunk_id = hashlib.sha256(
-                f"{doc_id}:{idx}:{text}".encode()
-            ).hexdigest()[:16]
+                    emb_parts = []
+                    if self.doc_title:
+                        emb_parts.append(f"Document: {self.doc_title}")
+                    if page_num:
+                        emb_parts.append(f"Page: {page_num}")
+                    if headings:
+                        emb_parts.append(f"Section: {' > '.join(headings)}")
+                    if col_labels:
+                        emb_parts.append(f"Columns: {', '.join(col_labels)}")
+                    if row_labels:
+                        emb_parts.append(f"Metrics: {'; '.join(row_labels[:20])}")
+                    emb_parts.append(block_text)
 
-            table_chunk = DocumentChunk(
-                    chunk_id=chunk_id,
-                    document_id=doc_id,
-                    content=text,
-                    embedding_text=embedding_text,
-                    chunk_type=chunk_type,
+                    final_chunks.append(
+                        DocumentChunk(
+                            chunk_id=chunk_id,
+                            document_id=doc_id,
+                            content=block_text,
+                            embedding_text=self._truncate("\n".join(emb_parts)),
+                            chunk_type="table",
+                            page_number=page_num,
+                            headings=headings,
+                            source_file=pdf_path.name,
+                            metadata={
+                                "page_numbers": pages,
+                                "columns": col_labels,
+                                "row_labels": row_labels,
+                                "is_financial_table": True,
+                                "table_block_index": b_idx,
+                            },
+                        )
+                    )
+
+                # Generate atomic multi-year row facts
+                facts = build_multiyear_fact_chunks(
+                    rows_by_metric=structured_rows,
+                    doc_id=doc_id,
+                    parent_chunk_id=f"{doc_id}:{idx}",
                     page_number=page_num,
                     headings=headings,
                     source_file=pdf_path.name,
-                    metadata={
-                        "page_numbers": pages,
-                        "columns": table_info.get("columns", []),
-                        "row_labels": table_info.get("row_labels", []),
-                        "is_financial_table": chunk_type == "table",
-                    },
                 )
-            final_chunks.append(table_chunk)
-            if chunk_type == "table":
-                final_chunks.extend(
-                    build_table_fact_chunks(
-                        extract_serialized_table_rows(text),
-                        doc_id=doc_id,
-                        parent_chunk_id=chunk_id,
+                final_chunks.extend(facts)
+
+            else:
+                chunk_id = hashlib.sha256(
+                    f"{doc_id}:{idx}:{text}".encode()
+                ).hexdigest()[:16]
+
+                emb_parts = []
+                if self.doc_title:
+                    emb_parts.append(f"Document: {self.doc_title}")
+                if page_num:
+                    emb_parts.append(f"Page: {page_num}")
+                if headings:
+                    emb_parts.append(f"Section: {' > '.join(headings)}")
+                emb_parts.append(text)
+
+                final_chunks.append(
+                    DocumentChunk(
+                        chunk_id=chunk_id,
+                        document_id=doc_id,
+                        content=text,
+                        embedding_text=self._truncate("\n".join(emb_parts)),
+                        chunk_type="text",
                         page_number=page_num,
                         headings=headings,
                         source_file=pdf_path.name,
+                        metadata={
+                            "page_numbers": pages,
+                            "columns": [],
+                            "row_labels": [],
+                            "is_financial_table": False,
+                        },
                     )
                 )
 

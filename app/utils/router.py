@@ -64,12 +64,15 @@ def is_document_inventory_query(query: str) -> bool:
 
 def detect_known_entities(query: str, known_companies: List[str]) -> List[str]:
     """Deterministic entity detection against the indexed company list (LLM-independent)."""
-    q = f" {company_key(query)} "
+    q_tokens = [re.sub(r"\'?s$", "", t) for t in re.findall(r"[a-z0-9]+", str(query or "").lower())]
+    q = f" {' '.join(q_tokens)} "
     found = []
     for name in known_companies:
         key = company_key(name)
-        if key and f" {key} " in q:
-            found.append(name)
+        if key:
+            key_stem = re.sub(r"\'?s$", "", key)
+            if f" {key} " in q or f" {key_stem} " in q:
+                found.append(name)
     return found
 
 
@@ -226,21 +229,25 @@ async def plan_query(
     # Entities used for retrieval: explicit ones, else the (carried-over) state company.
     effective_entities = entities or ([company] if company else [])
 
-    # ---- metric decomposition ----
+# ---- metric decomposition ----
     metrics = [str(m).strip() for m in (data.get("metrics") or []) if str(m).strip()]
     if not metrics:
         metrics = _fallback_metrics(query, effective_entities)
 
     year_str = " ".join(str(y) for y in years_list)
-    if len(metrics) <= 1 and len(effective_entities) <= 1:
+    
+    # Updated: Force entity and year inheritance across all sub-queries
+    sub_queries = []
+    for entity in effective_entities or [None]:
+        for metric in metrics:
+            text = " ".join(p for p in (entity, metric, year_str) if p)
+            sub_queries.append(SubQuery(text=text, entity=entity))
+    
+    if not sub_queries:
         sub_queries = [SubQuery(text=search_query, entity=effective_entities[0] if effective_entities else None)]
-    else:
-        sub_queries = []
-        for entity in effective_entities or [None]:
-            for metric in metrics:
-                text = " ".join(p for p in (entity, metric, year_str) if p)
-                sub_queries.append(SubQuery(text=text, entity=entity))
-        sub_queries = sub_queries[:MAX_SUB_QUERIES]
+        
+    sub_queries = sub_queries[:MAX_SUB_QUERIES]
+
 
     return RoutePlan(
         intent=intent,
