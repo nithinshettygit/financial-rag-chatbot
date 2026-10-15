@@ -1,10 +1,18 @@
+import os
+from dotenv import load_dotenv
+import logfire
+
+load_dotenv()
+logfire.configure(
+    service_name="financial-rag-indexer",
+    send_to_logfire=bool(os.environ.get("LOGFIRE_TOKEN"))
+)
 import argparse
 import json
 import re
 import uuid
 from pathlib import Path
 from typing import Union
-
 from fastembed import TextEmbedding
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -21,38 +29,41 @@ def _generate_deterministic_uuid(doc_id: str, chunk_id: str) -> str:
     namespace = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
     return str(uuid.uuid5(namespace, f"{doc_id}:{chunk_id}"))
 
-
+@logfire.instrument("seed_database_manifest", extract_args=True)  
 def seed_database(
     manifest_path: Union[str, Path],
     storage_path: str = DEFAULT_QDRANT_PATH,
     recreate_collection: bool = False,
 ) -> int:
     manifest_path = Path(manifest_path)
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Manifest missing at {manifest_path}")
+    with logfire.span("load_manifest_file", path=str(manifest_path)):
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Manifest missing at {manifest_path}")
 
-    with open(manifest_path, encoding="utf-8") as f:
-        chunks = json.load(f)
+        with open(manifest_path, encoding="utf-8") as f:
+            chunks = json.load(f)
 
-    valid_chunks = [c for c in chunks if c.get("content") and str(c.get("content")).strip()]
+        valid_chunks = [c for c in chunks if c.get("content") and str(c.get("content")).strip()]
     if not valid_chunks:
         return 0
 
     Path(storage_path).mkdir(parents=True, exist_ok=True)
-    client = QdrantClient(path=storage_path)
+    with logfire.span("connect_qdrant_client", storage_path=storage_path):
+        client = QdrantClient(path=storage_path)
 
-    if recreate_collection and client.collection_exists(COLLECTION_NAME):
-        client.delete_collection(COLLECTION_NAME)
+        if recreate_collection and client.collection_exists(COLLECTION_NAME):
+            logfire.warn("Recreating existing collection", collection=COLLECTION_NAME)
+            client.delete_collection(COLLECTION_NAME)
 
-    if not client.collection_exists(COLLECTION_NAME):
-        client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config={
-                VECTOR_NAME: models.VectorParams(
-                    size=384, distance=models.Distance.COSINE
-                )
-            },
-        )
+        if not client.collection_exists(COLLECTION_NAME):
+            client.create_collection(
+                collection_name=COLLECTION_NAME,
+                vectors_config={
+                    VECTOR_NAME: models.VectorParams(
+                        size=384, distance=models.Distance.COSINE
+                    )
+                },
+            )
 
     # Payload indexes for metadata filtering
     index_fields = [
@@ -72,69 +83,70 @@ def seed_database(
             )
         except Exception:
             pass  # Index already exists or handle gracefully
+    with logfire.span("generate_embeddings", model=VECTOR_NAME, count=len(valid_chunks)):
+        embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        texts = [str(c.get("embedding_text") or c.get("content")).strip() for c in valid_chunks]
 
-    embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-    texts = [str(c.get("embedding_text") or c.get("content")).strip() for c in valid_chunks]
-
-    embeddings = list(embedding_model.embed(texts, batch_size=32))
+        embeddings = list(embedding_model.embed(texts, batch_size=32))
 
     points = []
     point_ids_by_document = {}
-    for idx, (chunk, vector) in enumerate(zip(valid_chunks, embeddings)):
-        doc_id = chunk.get("document_id", "doc_default")
-        chunk_id = chunk.get("chunk_id", f"chunk_{idx}")
+    with logfire.span("build_qdrant_points", point_count=len(valid_chunks)):
+        for idx, (chunk, vector) in enumerate(zip(valid_chunks, embeddings)):
+            doc_id = chunk.get("document_id", "doc_default")
+            chunk_id = chunk.get("chunk_id", f"chunk_{idx}")
 
-        point_id = _generate_deterministic_uuid(doc_id, chunk_id)
-        point_ids_by_document.setdefault(doc_id, []).append(point_id)
+            point_id = _generate_deterministic_uuid(doc_id, chunk_id)
+            point_ids_by_document.setdefault(doc_id, []).append(point_id)
 
-        meta = chunk.get("metadata", {})
-        
-        # Company inference fallback
-        company = chunk.get("company") or meta.get("company")
-        if not company:
-            lower_doc = doc_id.lower()
-            if "nike" in lower_doc:
-                company = "Nike"
-            elif "duolingo" in lower_doc:
-                company = "Duolingo"
+            meta = chunk.get("metadata", {})
+            
+            # Company inference fallback
+            company = chunk.get("company") or meta.get("company")
+            if not company:
+                lower_doc = doc_id.lower()
+                if "nike" in lower_doc:
+                    company = "Nike"
+                elif "duolingo" in lower_doc:
+                    company = "Duolingo"
 
-        fiscal_year = chunk.get("fiscal_year") or meta.get("fiscal_year")
-        fiscal_years = chunk.get("fiscal_years") or meta.get("fiscal_years") or []
-        if not fiscal_year and not fiscal_years:
-            src_str = f"{doc_id} {chunk.get('source_file', '')}"
-            y_match = re.search(r"20\d{2}", src_str)
-            if y_match:
-                inferred_year = int(y_match.group(0))
-                fiscal_year = inferred_year
-                fiscal_years = [inferred_year]
+            fiscal_year = chunk.get("fiscal_year") or meta.get("fiscal_year")
+            fiscal_years = chunk.get("fiscal_years") or meta.get("fiscal_years") or []
+            if not fiscal_year and not fiscal_years:
+                src_str = f"{doc_id} {chunk.get('source_file', '')}"
+                y_match = re.search(r"20\d{2}", src_str)
+                if y_match:
+                    inferred_year = int(y_match.group(0))
+                    fiscal_year = inferred_year
+                    fiscal_years = [inferred_year]
 
-        payload = {
-            "chunk_id": chunk_id,
-            "document_id": doc_id,
-            "source_file": chunk.get("source_file", ""),
-            "content": chunk.get("content", ""),
-            "embedding_text": chunk.get("embedding_text", ""),
-            "page_number": chunk.get("page_number"),
-            "fiscal_year": fiscal_year,
-            "fiscal_years": fiscal_years,
-            "headings": chunk.get("headings", []),
-            "chunk_type": chunk.get("chunk_type", "text"),
-            "columns": meta.get("columns", []),
-            "row_labels": meta.get("row_labels", []),
-            "financial_metric": meta.get("financial_metric") or chunk.get("financial_metric"),
-            "metadata": meta,
-            "company": company,
-        }
+            payload = {
+                "chunk_id": chunk_id,
+                "document_id": doc_id,
+                "source_file": chunk.get("source_file", ""),
+                "content": chunk.get("content", ""),
+                "embedding_text": chunk.get("embedding_text", ""),
+                "page_number": chunk.get("page_number"),
+                "fiscal_year": fiscal_year,
+                "fiscal_years": fiscal_years,
+                "headings": chunk.get("headings", []),
+                "chunk_type": chunk.get("chunk_type", "text"),
+                "columns": meta.get("columns", []),
+                "row_labels": meta.get("row_labels", []),
+                "financial_metric": meta.get("financial_metric") or chunk.get("financial_metric"),
+                "metadata": meta,
+                "company": company,
+            }
 
-        points.append(
-            models.PointStruct(
-                id=point_id,
-                vector={VECTOR_NAME: vector.tolist()},
-                payload=payload,
+            points.append(
+                models.PointStruct(
+                    id=point_id,
+                    vector={VECTOR_NAME: vector.tolist()},
+                    payload=payload,
+                )
             )
-        )
-
-    client.upsert(collection_name=COLLECTION_NAME, points=points)
+    with logfire.span("upsert_points_to_qdrant", total_points=len(points)):
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
 
     # Synchronize and clean up orphan vectors for re-indexed documents
     for doc_id, point_ids in point_ids_by_document.items():
@@ -169,6 +181,7 @@ def seed_database(
             )
 
     client.close()
+    logfire.info("Successfully seeded database", indexed_points=len(points))
     return len(points)
 
 

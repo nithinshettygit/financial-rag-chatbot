@@ -63,3 +63,6 @@ inspecting vector search, BM25 retrieval, and FlashRank reranking modules.Diagno
 
 -15 11:37:33,237 [INFO] ragas_eval: Ragas Results Summary:
 {'context_precision': 0.7900, 'context_recall': 0.9333, 'faithfulness': 0.9222, 'answer_relevancy': 0.9534}
+
+5 12:47:05,085 [INFO] ragas_eval: Ragas Results Summary:
+{'context_precision': 0.7977, 'context_recall': 0.9412, 'faithfulness': 0.9031, 'answer_relevancy': 0.9743}

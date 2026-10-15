@@ -24,8 +24,8 @@ from app.utils.flashrank_reranker import FlashRankReranker
 logger = logging.getLogger(__name__)
 
 RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "30"))
-FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "10"))
-MAX_FINAL_TOP_K = int(os.getenv("MAX_FINAL_TOP_K", "12"))
+FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "5"))
+MAX_FINAL_TOP_K = int(os.getenv("MAX_FINAL_TOP_K", "10"))
 MIN_STRICT_YIELD = int(os.getenv("MIN_STRICT_YIELD", "5"))
 CATALOG_TTL_S = int(os.getenv("CATALOG_TTL_S", "300"))
 MAX_CONCURRENT_SEARCHES = int(os.getenv("MAX_CONCURRENT_SEARCHES", "8"))

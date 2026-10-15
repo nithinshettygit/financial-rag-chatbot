@@ -1,4 +1,18 @@
 # admin/app.py
+import os
+from dotenv import load_dotenv
+import logfire
+
+# Load the .env file so os.environ can find LOGFIRE_TOKEN
+load_dotenv() 
+
+# Globally configure Logfire once for the entire application lifecycle
+logfire.configure(
+    service_name="financial-rag-engine",
+    send_to_logfire=bool(os.environ.get("LOGFIRE_TOKEN"))
+)
+logfire.instrument_pydantic()
+
 import asyncio
 import hashlib
 import json
@@ -7,6 +21,7 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+from seed_qdrant import seed_database 
 
 # Ensure the admin directory is in sys.path to guarantee imports resolve
 ADMIN_DIR = Path(__file__).resolve().parent
@@ -111,21 +126,22 @@ with tab_pdf:
 
             with col1:
                 if st.button("Parse Document via Docling", key=f"parse_{upload_key}"):
-                    with st.spinner("Extracting financial tables and content..."):
-                        chunks, manifest_path = run_pipeline(
-                            pdf_path=pdf_file_path,
-                            doc_id=doc_id,
-                            out_dir=MANIFEST_DIR,
-                        )
-                        st.session_state[manifest_state_key] = {
-                            "doc_id": doc_id,
-                            "path": str(manifest_path),
-                            "total_chunks": len(chunks),
-                            "table_chunks": sum(1 for c in chunks if c.chunk_type == "table"),
-                            "table_facts": sum(1 for c in chunks if c.chunk_type == "table_fact"),
-                            "text_chunks": sum(1 for c in chunks if c.chunk_type == "text"),
-                        }
-                        st.success(f"Successfully parsed {len(chunks)} chunks!")
+                    with logfire.span("ui_parse_pdf_action", filename=uploaded_file.name, doc_id=doc_id):
+                        with st.spinner("Extracting financial tables and content..."):
+                            chunks, manifest_path = run_pipeline(
+                                pdf_path=pdf_file_path,
+                                doc_id=doc_id,
+                                out_dir=MANIFEST_DIR,
+                            )
+                            st.session_state[manifest_state_key] = {
+                                "doc_id": doc_id,
+                                "path": str(manifest_path),
+                                "total_chunks": len(chunks),
+                                "table_chunks": sum(1 for c in chunks if c.chunk_type == "table"),
+                                "table_facts": sum(1 for c in chunks if c.chunk_type == "table_fact"),
+                                "text_chunks": sum(1 for c in chunks if c.chunk_type == "text"),
+                            }
+                            st.success(f"Successfully parsed {len(chunks)} chunks!")
 
             with col2:
                 if st.button("Index into Qdrant", key=f"seed_{upload_key}"):
@@ -135,13 +151,15 @@ with tab_pdf:
                     elif not Path(manifest_info["path"]).exists():
                         st.error("Manifest file not found.")
                     else:
-                        with st.spinner("Embedding and indexing into Qdrant..."):
-                            indexed_count = seed_database(
-                                manifest_path=manifest_info["path"],
-                                storage_path=qdrant_path,
-                                recreate_collection=recreate_collection,
-                            )
-                            st.success(f"Successfully indexed {indexed_count} vectors into Qdrant!")
+                        with logfire.span("ui_seed_qdrant_action", doc_id=doc_id):
+                            with st.spinner("Embedding and indexing into Qdrant..."):
+                                indexed_count = seed_database(
+                                    manifest_path=manifest_info["path"],
+                                    storage_path=qdrant_path,
+                                    recreate_collection=recreate_collection,
+                                )
+                                logfire.info("UI Qdrant indexing completed", indexed_count=indexed_count, doc_id=doc_id)
+                                st.success(f"Successfully indexed {indexed_count} vectors into Qdrant!")
 
             if manifest_state_key in st.session_state:
                 info = st.session_state[manifest_state_key]
@@ -201,11 +219,11 @@ with tab_manifest:
                 # Save uploaded manifest locally to manifests dir for persistence
                 saved_manifest_path = MANIFEST_DIR / manifest_file_upload.name
                 saved_manifest_path.write_bytes(manifest_bytes)
-
-                with st.spinner("Indexing pre-parsed chunks into Qdrant vector database..."):
-                    indexed_count = seed_database(
-                        manifest_path=saved_manifest_path,
-                        storage_path=qdrant_path,
-                        recreate_collection=recreate_collection,
-                    )
-                    st.success(f"Successfully indexed {indexed_count} vectors from `{manifest_file_upload.name}` into Qdrant!")
+                with logfire.span("ui_seed_from_uploaded_manifest", filename=manifest_file_upload.name):
+                    with st.spinner("Indexing pre-parsed chunks into Qdrant vector database..."):
+                        indexed_count = seed_database(
+                            manifest_path=saved_manifest_path,
+                            storage_path=qdrant_path,
+                            recreate_collection=recreate_collection,
+                        )
+                        st.success(f"Successfully indexed {indexed_count} vectors from `{manifest_file_upload.name}` into Qdrant!")

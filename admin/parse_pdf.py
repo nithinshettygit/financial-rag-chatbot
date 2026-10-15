@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-
+import logfire
 from transformers import AutoTokenizer
 from docling.chunking import HybridChunker
 from docling.datamodel.pipeline_options import (
@@ -27,7 +27,7 @@ MIN_TEXT_WORDS = 6
 _CELL_SPLIT = re.compile(
     r"\.(?!\d)\s+(?=[A-Za-z0-9][^=,]{0,100}?,\s*[^=]{1,80}?=)"
 )
-_YEAR_RE = re.compile(r"20\d{2}")
+_YEAR_RE = re.compile(r"\b(19|20|21)\d{2}\b")
 _SEPARATOR_ROW = re.compile(r"^\|?[\s:\-|]+\|?$")
 
 
@@ -306,17 +306,66 @@ class FastDoclingChunker:
                 }
             )
             page_num = pages[0] if pages else None
+            with logfire.span("process_pdf_page_chunk", chunk_index=idx, page_number=page_num, chunk_type=chunk_type):
+                if chunk_type == "table":
+                    cols, structured_rows = extract_structured_table(text)
+                    row_labels = list(structured_rows.keys())
+                    col_labels = cols[:15]
 
-            if chunk_type == "table":
-                cols, structured_rows = extract_structured_table(text)
-                row_labels = list(structured_rows.keys())
-                col_labels = cols[:15]
+                    # Split large tables into bounded sub-blocks (< 500 tokens)
+                    table_blocks = split_large_table_content(text)
+                    for b_idx, block_text in enumerate(table_blocks):
+                        chunk_id = hashlib.sha256(
+                            f"{doc_id}:{idx}:block_{b_idx}:{block_text}".encode()
+                        ).hexdigest()[:16]
 
-                # Split large tables into bounded sub-blocks (< 500 tokens)
-                table_blocks = split_large_table_content(text)
-                for b_idx, block_text in enumerate(table_blocks):
+                        emb_parts = []
+                        if self.doc_title:
+                            emb_parts.append(f"Document: {self.doc_title}")
+                        if page_num:
+                            emb_parts.append(f"Page: {page_num}")
+                        if headings:
+                            emb_parts.append(f"Section: {' > '.join(headings)}")
+                        if col_labels:
+                            emb_parts.append(f"Columns: {', '.join(col_labels)}")
+                        if row_labels:
+                            emb_parts.append(f"Metrics: {'; '.join(row_labels[:20])}")
+                        emb_parts.append(block_text)
+
+                        final_chunks.append(
+                            DocumentChunk(
+                                chunk_id=chunk_id,
+                                document_id=doc_id,
+                                content=block_text,
+                                embedding_text=self._truncate("\n".join(emb_parts)),
+                                chunk_type="table",
+                                page_number=page_num,
+                                headings=headings,
+                                source_file=pdf_path.name,
+                                metadata={
+                                    "page_numbers": pages,
+                                    "columns": col_labels,
+                                    "row_labels": row_labels,
+                                    "is_financial_table": True,
+                                    "table_block_index": b_idx,
+                                },
+                            )
+                        )
+
+                    # Generate atomic multi-year row facts
+                    facts = build_multiyear_fact_chunks(
+                        rows_by_metric=structured_rows,
+                        doc_id=doc_id,
+                        parent_chunk_id=f"{doc_id}:{idx}",
+                        page_number=page_num,
+                        headings=headings,
+                        source_file=pdf_path.name,
+                    )
+                    final_chunks.extend(facts)
+
+                else:
                     chunk_id = hashlib.sha256(
-                        f"{doc_id}:{idx}:block_{b_idx}:{block_text}".encode()
+                        f"{doc_id}:{idx}:{text}".encode()
                     ).hexdigest()[:16]
 
                     emb_parts = []
@@ -326,75 +375,26 @@ class FastDoclingChunker:
                         emb_parts.append(f"Page: {page_num}")
                     if headings:
                         emb_parts.append(f"Section: {' > '.join(headings)}")
-                    if col_labels:
-                        emb_parts.append(f"Columns: {', '.join(col_labels)}")
-                    if row_labels:
-                        emb_parts.append(f"Metrics: {'; '.join(row_labels[:20])}")
-                    emb_parts.append(block_text)
+                    emb_parts.append(text)
 
                     final_chunks.append(
                         DocumentChunk(
                             chunk_id=chunk_id,
                             document_id=doc_id,
-                            content=block_text,
+                            content=text,
                             embedding_text=self._truncate("\n".join(emb_parts)),
-                            chunk_type="table",
+                            chunk_type="text",
                             page_number=page_num,
                             headings=headings,
                             source_file=pdf_path.name,
                             metadata={
                                 "page_numbers": pages,
-                                "columns": col_labels,
-                                "row_labels": row_labels,
-                                "is_financial_table": True,
-                                "table_block_index": b_idx,
+                                "columns": [],
+                                "row_labels": [],
+                                "is_financial_table": False,
                             },
                         )
                     )
-
-                # Generate atomic multi-year row facts
-                facts = build_multiyear_fact_chunks(
-                    rows_by_metric=structured_rows,
-                    doc_id=doc_id,
-                    parent_chunk_id=f"{doc_id}:{idx}",
-                    page_number=page_num,
-                    headings=headings,
-                    source_file=pdf_path.name,
-                )
-                final_chunks.extend(facts)
-
-            else:
-                chunk_id = hashlib.sha256(
-                    f"{doc_id}:{idx}:{text}".encode()
-                ).hexdigest()[:16]
-
-                emb_parts = []
-                if self.doc_title:
-                    emb_parts.append(f"Document: {self.doc_title}")
-                if page_num:
-                    emb_parts.append(f"Page: {page_num}")
-                if headings:
-                    emb_parts.append(f"Section: {' > '.join(headings)}")
-                emb_parts.append(text)
-
-                final_chunks.append(
-                    DocumentChunk(
-                        chunk_id=chunk_id,
-                        document_id=doc_id,
-                        content=text,
-                        embedding_text=self._truncate("\n".join(emb_parts)),
-                        chunk_type="text",
-                        page_number=page_num,
-                        headings=headings,
-                        source_file=pdf_path.name,
-                        metadata={
-                            "page_numbers": pages,
-                            "columns": [],
-                            "row_labels": [],
-                            "is_financial_table": False,
-                        },
-                    )
-                )
 
         return final_chunks, doc.export_to_markdown()
 
