@@ -289,18 +289,6 @@
   },
   {
     "id": "q025",
-    "user_input": "Which reportable segment had the highest EBIT in fiscal 2026, and how did it change from fiscal 2025?",
-    "retrieved_contexts": [
-      "Context text placeholder from vector DB"
-    ],
-    "response": "Model answer placeholder",
-    "reference": "North America, with EBIT of $5,376 million, up 14% from $4,735 million.",
-    "question_type": "multi-hop",
-    "source_reference": "MD&A \u00e2\u20ac\u201c Segment Information",
-    "source_page": 39
-  },
-  {
-    "id": "q026",
     "user_input": "Why did NIKE Direct revenues decline in fiscal 2026 and which components fell?",
     "retrieved_contexts": [
       "Context text placeholder from vector DB"

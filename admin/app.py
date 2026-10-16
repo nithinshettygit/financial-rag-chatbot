@@ -21,8 +21,6 @@ import sys
 from pathlib import Path
 
 import streamlit as st
-from admin.seed_qdrant_old import seed_database 
-
 # Ensure the admin directory is in sys.path to guarantee imports resolve
 ADMIN_DIR = Path(__file__).resolve().parent
 if str(ADMIN_DIR) not in sys.path:
@@ -47,8 +45,8 @@ if sys.platform == "win32":
         except Exception:
             pass
 
-from admin.parse_pdf_old import run_pipeline
-from admin.seed_qdrant_old import seed_database
+from parse_pdf import run_pipeline
+from seed_qdrant_old import seed_database
 
 # Dynamic base directory configuration (relative to project root)
 BASE_DIR = ADMIN_DIR.parent

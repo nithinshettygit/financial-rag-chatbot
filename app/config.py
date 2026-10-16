@@ -24,7 +24,10 @@ class Settings(BaseSettings):
     RRF_K: int = 60
     MAX_HISTORY_TURNS: int = 6
     MAX_CONTEXT_TOKENS: int = 4096
-
+# Add these fields to your existing Settings class in app/config.py
+    REDIS_URL: str = "redis://localhost:6379"
+    CACHE_TTL: int = 86400  # 24 hours (adjust based on your document update frequency)
+    SEMANTIC_CACHE_THRESHOLD: float = 0.95  # Strict threshold for financial precision
     class Config:
         env_file = ".env"
 

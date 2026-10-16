@@ -28,9 +28,8 @@ from app.config import settings
 # CONFIGURATION & LOGGING SETUP
 # ============================================================
 DATASET_PATH = Path("evaluation/dataset/ragas_dataset_cleaned_all.json")
-CACHE_PATH = Path("ragas_samples_cache.json")
-REPORT_PATH = Path("ragas_evaluation_report.csv")
-
+CACHE_PATH = Path("evaluation/cache/ragas_samples_cache.json")
+REPORT_PATH = Path("evaluation/report/ragas_evaluation_report.csv")
 # Updated with active, standard Groq judge models
 JUDGE_MODELS = ("qwen/qwen3.8-27b", "openai/gpt-oss-20b")
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
