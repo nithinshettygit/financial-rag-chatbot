@@ -47,19 +47,19 @@ def company_key(text: str) -> str:
     return " ".join(terms)
 
 
-def is_document_inventory_query(query: str) -> bool:
-    q = query.lower()
-    # Exclude financial metric contexts like "revenue source", "segment source", etc.
-    if re.search(r"\b(revenue|segment|income|earnings|cash|expense|cost)s?\s+sources?\b", q):
-        return False
+# def is_document_inventory_query(query: str) -> bool:
+#     q = query.lower()
+#     # Exclude financial metric contexts like "revenue source", "segment source", etc.
+#     if re.search(r"\b(revenue|segment|income|earnings|cash|expense|cost)s?\s+sources?\b", q):
+#         return False
 
-    mentions = re.search(
-        r"\b(documents?|files?|reports?|(?:data\s+)?sources?|datasets?|knowledge\s+bases?)\b", q
-    )
-    asks = re.search(r"\b(list|show|display|available|indexed|uploaded)\b", q) or re.search(
-        r"\b(what|which)\b.{0,60}\b(documents?|files?|reports?|sources?|datasets?)\b", q
-    )
-    return bool(mentions and asks)
+#     mentions = re.search(
+#         r"\b(documents?|files?|reports?|(?:data\s+)?sources?|datasets?|knowledge\s+bases?)\b", q
+#     )
+#     asks = re.search(r"\b(list|show|display|available|indexed|uploaded)\b", q) or re.search(
+#         r"\b(what|which)\b.{0,60}\b(documents?|files?|reports?|sources?|datasets?)\b", q
+#     )
+#     return bool(mentions and asks)
 # app/utils/router.py
 
 def detect_known_entities(query: str, known_companies: List[str]) -> List[str]:
@@ -175,8 +175,8 @@ async def plan_query(
     known = known_companies or []
 
     # Only keep the safe document inventory check if explicit file listing is requested
-    if is_document_inventory_query(query):
-        return RoutePlan(intent="document_inventory", search_query=query, state=state)
+    # if is_document_inventory_query(query):
+    #     return RoutePlan(intent="document_inventory", search_query=query, state=state)
 
     data = await asyncio.to_thread(_call_router_llm, query, history, state, known)
     intent = data.get("intent", "rag_search")
