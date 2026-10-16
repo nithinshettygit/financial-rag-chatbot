@@ -43,6 +43,13 @@ def seed_database(
         with open(manifest_path, encoding="utf-8") as f:
             chunks = json.load(f)
 
+        # parse_pdf.py also writes <doc>_quality.json / <doc>_docling.json (JSON objects).
+        # Only a list of chunk dicts is a manifest; never crash on the others.
+        if not isinstance(chunks, list):
+            logfire.warn("Skipping non-manifest JSON file", path=str(manifest_path))
+            return 0
+        chunks = [c for c in chunks if isinstance(c, dict)]
+
         valid_chunks = [c for c in chunks if c.get("content") and str(c.get("content")).strip()]
     if not valid_chunks:
         return 0
@@ -134,6 +141,8 @@ def seed_database(
                 "columns": meta.get("columns", []),
                 "row_labels": meta.get("row_labels", []),
                 "financial_metric": meta.get("financial_metric") or chunk.get("financial_metric"),
+                "table_caption": chunk.get("table_caption"),
+                "row_group": meta.get("row_group"),
                 "metadata": meta,
                 "company": company,
             }
@@ -194,6 +203,7 @@ def seed_all_manifests(
     manifest_files = [
         f for f in manifest_dir.glob("*.json")
         if not f.name.startswith("old_") and "_old" not in f.name and not f.name.endswith(".bak") and "cache" not in f.name
+        and not f.name.endswith(("_quality.json", "_docling.json"))
     ]
     total_indexed = 0
     first = True

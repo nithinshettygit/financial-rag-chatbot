@@ -324,17 +324,17 @@ Natural Conversation Summary:"""
 
             
         # 3. Handle Document Inventory Intent
-        if plan.intent == "document_inventory":
-            with logfire.span("Document Inventory Lookup"):
-                doc_list = "\n".join(f"- **{d.get('company', 'Unknown')}**: `{d.get('source_file')}` (ID: `{d.get('document_id')}`)" for d in catalog)
-                answer = f"Here are the indexed financial documents available in the knowledge base:\n\n{doc_list if doc_list else 'No documents currently indexed.'}"
-                total_duration = round(time.perf_counter() - t0, 2)
-                root_span.set_attribute("total_duration_s", total_duration)
+        # if plan.intent == "document_inventory":
+        #     with logfire.span("Document Inventory Lookup"):
+        #         doc_list = "\n".join(f"- **{d.get('company', 'Unknown')}**: `{d.get('source_file')}` (ID: `{d.get('document_id')}`)" for d in catalog)
+        #         answer = f"Here are the indexed financial documents available in the knowledge base:\n\n{doc_list if doc_list else 'No documents currently indexed.'}"
+        #         total_duration = round(time.perf_counter() - t0, 2)
+        #         root_span.set_attribute("total_duration_s", total_duration)
 
-                return ChatResponse(
-                    session_id=request.session_id, answer=answer, intent=plan.intent,
-                    search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
-                )
+        #         return ChatResponse(
+        #             session_id=request.session_id, answer=answer, intent=plan.intent,
+        #             search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
+        #         )
 
         # 4. Handle Standard RAG Search Intent (Hybrid Retrieval + FlashRank Reranking + Generation)
 # 3. Handle Standard RAG Search Intent
