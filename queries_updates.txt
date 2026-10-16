@@ -84,3 +84,8 @@ Introduced logfire for parsing and seeding qdrant including streamlit updating
 • Context Recall: 0.944243
 • Faithfulness: 0.921522
 • Answer Relevancy: 0.982424
+
+
+
+redis chaching implmnt: 
+working , failed for semantically similar queries: year and company hallucination

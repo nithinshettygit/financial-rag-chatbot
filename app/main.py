@@ -4,7 +4,7 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 import logfire
-
+from app.utils.cache import init_financial_cache
 from app.config import settings
 from app.schemas import ChatRequest, ChatResponse
 from app.pipeline import run_rag_pipeline_async, shutdown_pipeline, warmup_pipeline
@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
     with logfire.span("Server Startup & Warmup"):
         try:
             await warmup_pipeline()
+            await asyncio.to_thread(init_financial_cache)
         except Exception:
             logger.exception("Warmup failed")
             raise
