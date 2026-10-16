@@ -29,6 +29,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from annotated_types import doc
+
 import logfire
 from transformers import AutoTokenizer
 from docling.chunking import HybridChunker
@@ -691,9 +693,10 @@ class FastDoclingChunker:
         self, pdf_path: Union[str, Path], doc_id: str
     ) -> Tuple[List[DocumentChunk], str]:
         pdf_path = Path(pdf_path)
+        print(f"[*] Converting PDF layout (OCR mode: {self.ocr_mode})...")
         doc, ocr_used = self._convert(pdf_path)
         self.last_doc = doc
-
+        print(f"[+] Conversion complete. Total pages in document: {len(doc.pages)}. Extracting chunks...")
         tables_by_ref = {t.self_ref: t for t in doc.tables}
         seen_tables: set = set()
         stats: Counter = Counter()
@@ -781,7 +784,9 @@ class FastDoclingChunker:
                     }
                 )
                 page_num = pages[0] if pages else None
-
+                with logfire.span("process_pdf_chunk", chunk_index=idx, page_number=page_num):
+                                if items and all(_is_table_item(i) for i in items):
+                                    print(f"  -> [Page {page_num}] Processing Table block ({idx+1}/{total_raw})")
                 if len(text) < MIN_TEXT_CHARS or len(text.split()) < MIN_TEXT_WORDS:
                     # Short fragment: never dropped, merged with its neighbours
                     # (same page + same section) into one chunk.
@@ -854,7 +859,7 @@ def run_pipeline(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     chunker = FastDoclingChunker(doc_title=doc_id, device=device, ocr_mode=ocr_mode)
-    chunks, markdown_text = chunker.process_pdf(pdf_path, doc_id)
+    chunks = chunker.process_pdf(pdf_path, doc_id)
 
     # (out_dir / f"{doc_id}_document.md").write_text(markdown_text, encoding="utf-8")
     manifest_path = out_dir / f"{doc_id}_manifest.json"

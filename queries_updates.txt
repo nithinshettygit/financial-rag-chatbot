@@ -78,3 +78,9 @@ Introduced logfire for parsing and seeding qdrant including streamlit updating
 
 
 
+:18<00:00,  7.10s/it]
+2026-10-16 13:04:20,651 [INFO] ragas_eval: Ragas Results Summary:
+• Context Precision: 0.874896
+• Context Recall: 0.944243
+• Faithfulness: 0.921522
+• Answer Relevancy: 0.982424
