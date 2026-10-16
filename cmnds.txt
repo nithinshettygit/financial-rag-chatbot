@@ -1,0 +1,2 @@
+docker exec -it financial-redis redis-cli FLUSHALL
+for clearingf cache redis

@@ -21,3 +21,5 @@ langchain-community
 logfire[httpx]
 logfire[fastapi]
 deepeval
+redis 
+redisvl

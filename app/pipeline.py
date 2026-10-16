@@ -22,6 +22,8 @@ from app.utils.vector import QdrantVectorRetriever
 from app.utils.flashrank_reranker import FlashRankReranker
 from app.utils.cache import get_cached_rag_response, set_cached_rag_response
 logger = logging.getLogger(__name__)
+from app.utils.cache import init_financial_cache
+
 
 RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "30"))
 FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "5"))
@@ -78,11 +80,13 @@ async def warmup_pipeline() -> None:
     def _warm_vector(): get_vector().retrieve("warmup query", 1, None)
     def _warm_bm25(): get_bm25().retrieve("warmup query", 1, None)
     def _warm_reranker(): _get_reranker().rerank("warmup query", [{"content": "warmup"}], 1)
+    def _warm_cache(): init_financial_cache() # Pre-loads HFTextVectorizer and connects to Redis index
 
     await asyncio.gather(
         asyncio.to_thread(_warm_vector),
         asyncio.to_thread(_warm_bm25),
         asyncio.to_thread(_warm_reranker),
+        asyncio.to_thread(_warm_cache),
         asyncio.to_thread(get_groq),
     )
     await get_catalog(force=True)
@@ -242,11 +246,12 @@ def build_context(
         selected.append(item)
     return sep.join(parts), source_map, selected
 
-
 async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
     t0 = time.perf_counter()
     
     with logfire.span("Execute RAG Pipeline", query=request.query, session_id=request.session_id) as root_span:
+        
+        # --- 1. Catalog & Query Planning (Done ONCE) ---
         catalog = await get_catalog()
         known_companies = sorted({d["company"] for d in catalog if d.get("company")})
 
@@ -254,10 +259,32 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             plan = await plan_query(request.query, request.history or [], request.state or SessionState(), known_companies)
             plan_span.set_attribute("intent", plan.intent)
             plan_span.set_attribute("entities", plan.entities)
+            plan_span.set_attribute("search_query", plan.search_query)
 
-        # 1. Handle General Chat Intent (Dynamic Conversational Response using History)
-# 1. Handle General Chat Intent (Professional Assistant Persona)
-# 1. Handle General Chat Intent (Professional Assistant Persona)
+        # --- 2. Check Semantic Cache Using the Cleaned Search Query ---
+        cache_key_query = plan.search_query if plan.search_query else request.query
+        
+        cached_result = await asyncio.to_thread(get_cached_rag_response, cache_key_query)
+        if cached_result:
+            total_duration = round(time.perf_counter() - t0, 2)
+            root_span.set_attribute("cache_hit", True)
+            root_span.set_attribute("total_duration_s", total_duration)
+            
+            cached_chunks = [ContextChunk(**c) if isinstance(c, dict) else c for c in cached_result["retrieved_chunks"]]
+            
+            return ChatResponse(
+                session_id=request.session_id,
+                answer=cached_result["answer"],
+                intent=cached_result["intent"],
+                search_query=cached_result["search_query"],
+                state=request.state or SessionState(),
+                retrieved_chunks=cached_chunks,
+                source_map={}
+            )
+        
+        root_span.set_attribute("cache_hit", False)
+
+        # --- 3. Handle General Chat Intent ---
         if plan.intent == "general_chat":
             with logfire.span("General Chat Generation", model=settings.LLM_MODEL):
                 messages = [
@@ -283,13 +310,22 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
                 total_duration = round(time.perf_counter() - t0, 2)
                 root_span.set_attribute("total_duration_s", total_duration)
                 
+                if not request.history:
+                    asyncio.create_task(asyncio.to_thread(
+                        set_cached_rag_response,
+                        cache_key_query,
+                        answer,
+                        [],
+                        plan.intent,
+                        plan.search_query
+                    ))
+                
                 return ChatResponse(
                     session_id=request.session_id, answer=answer, intent=plan.intent,
                     search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
                 )
 
-        # 2. Handle Chat Summary Intent
-# 2. Handle Chat Summary Intent (Warm, Natural, Conversational Persona)
+        # --- 4. Handle Chat Summary Intent ---
         if plan.intent == "chat_summary":
             with logfire.span("Generate Chat Summary", history_turns=len(request.history or [])):
                 if not request.history:
@@ -298,7 +334,7 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
                     history_text = "\n".join(f"{t.role}: {t.content}" for t in request.history)
                     summary_prompt = f"""You are the assistant participating directly in this conversation. Speak naturally to the user in a warm, conversational, and direct tone (using "you" and "we"). 
 
-Summarize the key questions the user asked and the main points we discussed so far. Do NOT sound like an external observer, bot report, or third-person logger (e.g. do NOT say "The user asked..." or "Assistant replied...").
+Summarize the key questions the user asked and the main points we discussed so far. Do NOT sound like an external observer, bot report, or third-person logger.
 
 Conversation History:
 {history_text}
@@ -317,27 +353,22 @@ Natural Conversation Summary:"""
                 total_duration = round(time.perf_counter() - t0, 2)
                 root_span.set_attribute("total_duration_s", total_duration)
 
+                if not request.history:
+                    asyncio.create_task(asyncio.to_thread(
+                        set_cached_rag_response,
+                        cache_key_query,
+                        answer,
+                        [],
+                        plan.intent,
+                        plan.search_query
+                    ))
+
                 return ChatResponse(
                     session_id=request.session_id, answer=answer, intent=plan.intent,
                     search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
                 )
 
-            
-        # 3. Handle Document Inventory Intent
-        # if plan.intent == "document_inventory":
-        #     with logfire.span("Document Inventory Lookup"):
-        #         doc_list = "\n".join(f"- **{d.get('company', 'Unknown')}**: `{d.get('source_file')}` (ID: `{d.get('document_id')}`)" for d in catalog)
-        #         answer = f"Here are the indexed financial documents available in the knowledge base:\n\n{doc_list if doc_list else 'No documents currently indexed.'}"
-        #         total_duration = round(time.perf_counter() - t0, 2)
-        #         root_span.set_attribute("total_duration_s", total_duration)
-
-        #         return ChatResponse(
-        #             session_id=request.session_id, answer=answer, intent=plan.intent,
-        #             search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
-        #         )
-
-        # 4. Handle Standard RAG Search Intent (Hybrid Retrieval + FlashRank Reranking + Generation)
-# 3. Handle Standard RAG Search Intent
+        # --- 5. Handle Standard RAG Search Intent ---
         entity_filters = {}
         missing = []
         for entity in plan.entities or [None]:
@@ -404,7 +435,6 @@ Natural Conversation Summary:"""
 
         # --- Developer Observability: Attach Retrieved Chunk Manifests to LLM Span ---
         with logfire.span("LLM Generation (Groq)", model=settings.LLM_MODEL) as llm_span:
-            # Attach detailed source metadata for backend debugging / Logfire dashboard filtering
             llm_span.set_attribute("retrieved.document_ids", [c.get("document_id") for c in final_chunks])
             llm_span.set_attribute("retrieved.source_files", [c.get("source_file") for c in final_chunks])
             llm_span.set_attribute("retrieved.chunk_ids", [c.get("chunk_id") for c in final_chunks])
@@ -426,7 +456,6 @@ Natural Conversation Summary:"""
             if hasattr(response, "usage") and response.usage:
                 llm_span.set_attribute("total_tokens", response.usage.total_tokens)
 
-                
         total_duration = round(time.perf_counter() - t0, 2)
         root_span.set_attribute("total_duration_s", total_duration)
 
@@ -439,8 +468,21 @@ Natural Conversation Summary:"""
             )
             for r in final_chunks
         ]
-        return ChatResponse(
+        
+        response_payload = ChatResponse(
             session_id=request.session_id, answer=answer, intent=plan.intent,
             search_query=plan.search_query, state=plan.state,
             retrieved_chunks=context_chunks, source_map=source_map,
         )
+
+        # --- 6. Store successful standard RAG results in Redis Cache ---
+        asyncio.create_task(asyncio.to_thread(
+            set_cached_rag_response,
+            cache_key_query,
+            answer,
+            context_chunks,
+            plan.intent,
+            plan.search_query
+        ))
+
+        return response_payload

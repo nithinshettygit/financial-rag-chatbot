@@ -55,6 +55,7 @@ for msg in st.session_state.messages:
                     st.code(chunk.get("content", ""), language="markdown")
 
 # Chat Input & Interaction Handling
+# Chat Input & Interaction Handling
 if user_input := st.chat_input("Ask a financial question (e.g., 'What was Duolingo's subscription revenue in 2023?')..."):
     # Render user message
     st.session_state.messages.append({"role": "user", "content": user_input})
@@ -77,7 +78,18 @@ if user_input := st.chat_input("Ask a financial question (e.g., 'What was Duolin
     with st.chat_message("assistant"):
         with st.spinner("Executing Hybrid Retrieval (Vector + BM25) & Reranking..."):
             try:
-                response = requests.post(API_URL, json=payload, timeout=45)
+                # 1. First check if backend is ready (prevents cold-start gateway drops)
+                try:
+                    ready_res = requests.get("http://localhost:8000/health/ready", timeout=5)
+                    if ready_res.status_code != 200:
+                        st.warning("Server is still warming up models. Please wait a moment and try again.")
+                        st.stop()
+                except requests.exceptions.RequestException:
+                    st.error("FastAPI server is offline or starting up. Ensure backend is running.")
+                    st.stop()
+
+                # 2. Make chat request with a generous timeout (60s for cold-start model calls)
+                response = requests.post(API_URL, json=payload, timeout=60)
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -105,8 +117,12 @@ if user_input := st.chat_input("Ask a financial question (e.g., 'What was Duolin
                         "content": answer,
                         "retrieved_chunks": retrieved_chunks
                     })
+                elif response.status_code == 503:
+                    st.warning("The application is finishing its initialization warmup. Please try sending your message again in 5 seconds.")
                 else:
                     st.error(f"API Error {response.status_code}: {response.text}")
 
+            except requests.exceptions.Timeout:
+                st.error("The request took too long to process. The first query loads embedding models and vector indexes into memory—please try submitting your query again now that initialization is complete.")
             except requests.exceptions.RequestException as e:
                 st.error(f"Failed to connect to FastAPI Backend at {API_URL}: {str(e)}")
