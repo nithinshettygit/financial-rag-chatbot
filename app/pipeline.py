@@ -261,10 +261,18 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             plan_span.set_attribute("entities", plan.entities)
             plan_span.set_attribute("search_query", plan.search_query)
 
-        # --- 2. Check Semantic Cache Using the Cleaned Search Query ---
+# --- 2. Check Semantic Cache Using Cleaned Search Query & Manifest Metadata ---
         cache_key_query = plan.search_query if plan.search_query else request.query
+        target_entity = plan.entities[0] if plan.entities else None
+        target_year = plan.years[0] if plan.years else None
         
-        cached_result = await asyncio.to_thread(get_cached_rag_response, cache_key_query)
+        cached_result = await asyncio.to_thread(
+            get_cached_rag_response, 
+            cache_key_query, 
+            entity=target_entity, 
+            year=target_year, 
+            intent=plan.intent
+        )
         if cached_result:
             total_duration = round(time.perf_counter() - t0, 2)
             root_span.set_attribute("cache_hit", True)
@@ -334,12 +342,12 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
                     history_text = "\n".join(f"{t.role}: {t.content}" for t in request.history)
                     summary_prompt = f"""You are the assistant participating directly in this conversation. Speak naturally to the user in a warm, conversational, and direct tone (using "you" and "we"). 
 
-Summarize the key questions the user asked and the main points we discussed so far. Do NOT sound like an external observer, bot report, or third-person logger.
+                    Summarize the key questions the user asked and the main points we discussed so far. Do NOT sound like an external observer, bot report, or third-person logger.
 
-Conversation History:
-{history_text}
+                    Conversation History:
+                    {history_text}
 
-Natural Conversation Summary:"""
+                    Natural Conversation Summary:"""
                     summary_response = await asyncio.to_thread(
                         lambda: chat_with_retry(
                             get_groq(),
@@ -475,14 +483,23 @@ Natural Conversation Summary:"""
             retrieved_chunks=context_chunks, source_map=source_map,
         )
 
-        # --- 6. Store successful standard RAG results in Redis Cache ---
+# --- Extract manifest identifiers from retrieved chunks ---
+        document_ids = list({c.get("document_id") for c in final_chunks if c.get("document_id")})
+        final_entity = plan.entities[0] if plan.entities else (document_ids[0] if document_ids else None)
+        final_year = plan.years[0] if plan.years else None
+
+        # --- 6. Store successful standard RAG results with manifest metadata ---
         asyncio.create_task(asyncio.to_thread(
             set_cached_rag_response,
-            cache_key_query,
-            answer,
-            context_chunks,
-            plan.intent,
-            plan.search_query
+            query=cache_key_query,
+            answer=answer,
+            retrieved_chunks=context_chunks,
+            intent=plan.intent,
+            search_query=plan.search_query,
+            entity=final_entity,
+            year=final_year,
+            document_ids=document_ids
         ))
 
         return response_payload
+    
