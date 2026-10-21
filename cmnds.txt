@@ -1,2 +1,16 @@
+
+
+docker start financial-redis
+
+uvicorn app.main:app --reload
+
+streamlit run app/app.py
+
+
 docker exec -it financial-redis redis-cli FLUSHALL
-for clearingf cache redis
+#for clearingf cache redis
+
+
+#remove
+docker rm -f financial-redis
+docker run -d --name financial-redis -p 6379:6379 redis:latest
