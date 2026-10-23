@@ -1,19 +1,23 @@
 import asyncio
 import json
 import logging
+import inspect
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
+import datasets.arrow_dataset
+datasets.arrow_dataset.generate_fingerprint = lambda self, *args, **kwargs: "dummy_fingerprint"
+
 import httpx
 from openai import AsyncOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
+import pandas as pd
 
-from ragas import evaluate
 from ragas.run_config import RunConfig
-from ragas.llms import llm_factory
+from ragas.llms import LangchainLLMWrapper
 from ragas.metrics import (
     context_precision,
     context_recall,
@@ -23,20 +27,21 @@ from ragas.metrics import (
 
 from app.pipeline import run_rag_pipeline_async, ChatRequest
 from app.config import settings
-
+from langchain_openai import ChatOpenAI
+from ragas.dataset_schema import SingleTurnSample
 # ============================================================
 # CONFIGURATION & LOGGING SETUP
 # ============================================================
 DATASET_PATH = Path("evaluation/dataset/ragas_dataset_cleaned_all.json")
-CACHE_PATH = Path("evaluation/cache/ragas_samples_cache.json")
+CACHE_PATH = Path("evaluation/ragas_samples_cache.json")
 REPORT_PATH = Path("evaluation/report/ragas_evaluation_report.csv")
-# Updated with active, standard Groq judge models
+
 JUDGE_MODELS = ("qwen/qwen3.8-27b", "openai/gpt-oss-20b")
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 
 MAX_CONTEXTS = 5
 MAX_CONTEXT_CHARS = 1500
-MAX_WORKERS = 1  # Strict single worker to avoid Groq TPM limits
+MAX_WORKERS = 1  
 MAX_CONCURRENT_PIPELINE = 2
 JUDGE_TIMEOUT = 60
 MAX_RETRIES = 5
@@ -55,8 +60,6 @@ _DURATION_MAP = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
 # STREAMLINED FAILOVER & RETRY TRANSPORT
 # ============================================================
 class GroqFailoverTransport(httpx.AsyncBaseTransport):
-    """Handles Groq model failovers and rate-limit backoff sleeps with proper re-attempts."""
-
     def __init__(self, api_keys: list[str]):
         self._api_keys = api_keys
         self._transport = httpx.AsyncHTTPTransport(retries=0)
@@ -103,10 +106,9 @@ class GroqFailoverTransport(httpx.AsyncBaseTransport):
                 if i < len(candidates) - 1:
                     logger.warning("Groq judge failed with HTTP %d for model %s. Failing over...", status, model)
 
-            # If all candidates hit 429, sleep for the required delay and retry the outer loop
             if last_resp and last_resp.status_code == 429:
                 sleep_time = retry_delay if retry_delay > 0 else 5.0 * (outer_attempt + 1)
-                logger.warning("All Groq key/model options rate-limited (Attempt %d/%d); sleeping for %.2fs", outer_attempt + 1, max_outer_attempts, sleep_time)
+                logger.warning("All Groq key/model options rate-limited; sleeping for %.2fs", sleep_time)
                 await asyncio.sleep(sleep_time)
                 continue
 
@@ -119,13 +121,6 @@ class GroqFailoverTransport(httpx.AsyncBaseTransport):
         if retry_after := headers.get("retry-after"):
             try: return max(0.0, float(retry_after))
             except ValueError: pass
-        try:
-            msg = str(json.loads(body).get("error", {}).get("message", ""))
-            match = _DURATION_REGEX.search(msg)
-            if match:
-                return sum(float(v) * _DURATION_MAP[u.lower()] for v, u in re.findall(r"(\d+(?:\.\d+)?)(ms|h|m|s)", match.group(1), re.IGNORECASE))
-        except Exception:
-            pass
         return 5.0
 
     @staticmethod
@@ -148,19 +143,17 @@ class GroqFailoverTransport(httpx.AsyncBaseTransport):
 
 def build_judge_llm():
     primary = (settings.GROQ_API_KEY or "").strip()
-    fallback = (settings.FALLBACK_GROQ_API_KEY or "").strip()
     if not primary:
         raise ValueError("GROQ_API_KEY is missing in settings.")
 
-    api_keys = list(dict.fromkeys(k for k in (primary, fallback) if k))
-    client = AsyncOpenAI(
-        api_key=primary,
-        base_url="https://api.groq.com/openai/v1",
+    chat_model = ChatOpenAI(
+        model=JUDGE_MODELS[0],
+        openai_api_key=primary,
+        openai_api_base="https://api.groq.com/openai/v1",
         timeout=JUDGE_TIMEOUT,
         max_retries=0,
-        http_client=httpx.AsyncClient(timeout=JUDGE_TIMEOUT, transport=GroqFailoverTransport(api_keys)),
     )
-    return llm_factory(model=JUDGE_MODELS[0], provider="openai", client=client)
+    return LangchainLLMWrapper(chat_model)
 
 
 # ============================================================
@@ -169,12 +162,8 @@ def build_judge_llm():
 def load_json(path: Path) -> Any:
     if not path.exists():
         raise FileNotFoundError(f"Dataset or cache file not found: {path}")
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except json.JSONDecodeError as exc:
-        logger.error("Failed to parse JSON from %s: %s", path, exc)
-        raise
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def validate_samples(samples: list) -> list[dict]:
@@ -227,7 +216,6 @@ async def process_single_item(item: dict, index: int, total: int, semaphore: asy
 async def collect_samples(items: list[dict]) -> tuple[list[dict], list[dict]]:
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_PIPELINE)
     total = len(items)
-    
     tasks = [process_single_item(item, i, total, semaphore) for i, item in enumerate(items, 1)]
     results = await asyncio.gather(*tasks)
 
@@ -263,44 +251,93 @@ async def get_samples(refresh: bool) -> tuple[list[dict], list[dict]]:
 
 
 # ============================================================
-# EVALUATION
+# ROBUST DIRECT ASYNC EVALUATION LOOP
 # ============================================================
-def evaluate_samples(samples: list[dict]):
+
+async def evaluate_single_sample(metric, sample: dict) -> float:
+    """Score one sample with Ragas' async API and a bounded timeout."""
+    try:
+        eval_sample = SingleTurnSample(
+            user_input=sample["user_input"],
+            retrieved_contexts=sample["retrieved_contexts"],
+            response=sample["response"],
+            reference=sample["reference"],
+        )
+
+        score_method = getattr(metric, "single_turn_ascore", None)
+        if callable(score_method):
+            # Current Ragas API. Its timeout bounds the metric's internal work.
+            result = score_method(eval_sample, timeout=JUDGE_TIMEOUT)
+        else:
+            # Compatibility with older Ragas APIs: ascore expects a row dict.
+            score_method = getattr(metric, "ascore", None)
+            if not callable(score_method):
+                raise TypeError(
+                    f"Metric {getattr(metric, 'name', type(metric).__name__)} "
+                    "has neither single_turn_ascore() nor ascore()."
+                )
+            result = score_method(eval_sample.model_dump(), timeout=JUDGE_TIMEOUT)
+
+        if inspect.isawaitable(result):
+            # Outer timeout protects against wrappers that ignore the Ragas timeout.
+            score = await asyncio.wait_for(result, timeout=JUDGE_TIMEOUT + 5)
+        else:
+            score = result
+
+        if score is None:
+            return float("nan")
+        return float(score)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Metric %s failed for sample %s (%s): %s",
+            getattr(metric, "name", type(metric).__name__),
+            sample.get("id"), type(exc).__name__, exc,
+        )
+        return float("nan")
+
+
+async def evaluate_samples_robust(samples: list[dict]):
+    try:
+        from importlib.metadata import version
+        logger.info("Installed Ragas version: %s", version("ragas"))
+    except Exception:
+        logger.debug("Could not determine installed Ragas version.")
+
     logger.info("Initializing judge LLM and embeddings...")
     judge_llm = build_judge_llm()
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
-    for m in (context_precision, context_recall, faithfulness, answer_relevancy):
+    metrics = [context_precision, context_recall, faithfulness, answer_relevancy]
+    for m in metrics:
         m.llm = judge_llm
         if hasattr(m, "embeddings"):
             m.embeddings = embeddings
 
-    dataset = Dataset.from_list([{k: s[k] for k in ("user_input", "retrieved_contexts", "response", "reference")} for s in samples])
+    logger.info("Starting robust direct async evaluation on %d samples...", len(samples))
     
-    logger.info("Starting Ragas evaluation on %d samples with max_workers=%d...", len(samples), MAX_WORKERS)
-    try:
-        results = evaluate(
-            dataset=dataset,
-            metrics=[context_precision, context_recall, faithfulness, answer_relevancy],
-            llm=judge_llm,
-            embeddings=embeddings,
-            run_config=RunConfig(max_workers=MAX_WORKERS, timeout=JUDGE_TIMEOUT, max_retries=MAX_RETRIES),
-            raise_exceptions=False,
-            show_progress=True,
-        )
-    except Exception as exc:
-        logger.error("Critical error during Ragas evaluation execution: %s", exc)
-        raise
+    results_data = []
+    for idx, s in enumerate(samples, 1):
+        logger.info("Evaluating sample [%d/%d] ID: %s", idx, len(samples), s["id"])
+        row_result = {"id": s["id"]}
+        
+        for m in metrics:
+            metric_name = m.name
+            score = await evaluate_single_sample(m, s)
+            row_result[metric_name] = score
+            # Brief pause to respect API rate limits
+            await asyncio.sleep(0.5)
+            
+        results_data.append(row_result)
 
-    df = results.to_pandas()
-    df.insert(0, "id", [s["id"] for s in samples])
-    
+    df = pd.DataFrame(results_data)
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(REPORT_PATH, index=False, encoding="utf-8-sig")
 
-    logger.info("Ragas Results Summary:\n%s", results)
+    logger.info("Evaluation Results Summary:\n%s", df.mean(numeric_only=True))
     logger.info("Evaluation report successfully saved to %s", REPORT_PATH.resolve())
-    return results
+    return df
 
 
 # ============================================================
@@ -309,7 +346,9 @@ def evaluate_samples(samples: list[dict]):
 async def main():
     refresh_cache = "--refresh" in sys.argv
     samples, problems = await get_samples(refresh_cache)
-    await asyncio.to_thread(evaluate_samples, samples)
+    
+    await evaluate_samples_robust(samples)
+
     if problems:
         logger.warning("Completed with %d excluded or failed pipeline records.", len(problems))
 

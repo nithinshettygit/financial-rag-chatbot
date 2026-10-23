@@ -1,0 +1,317 @@
+{
+  "samples": [
+    {
+      "id": "q001",
+      "user_input": "What were NIKE, Inc.'s total revenues in fiscal 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: TOTAL REVENUES, YEAR ENDED MAY 31, 2026.TOTAL NIKE | INC = $ 46,398.",
+        "Nike-Inc-2026-10K: TOTAL REVENUES, YEAR ENDED MAY 31, 2026.TOTAL NIKE | INC = $ 46,398.",
+        "= 7 %. Global Brand Divisions (2), % CHANGE EXCLUDING CURRENCY CHANGES (1) = 10 %. TOTAL NIKE BRAND REVENUES (3), FISCAL 2026 = $ 45,222. TOTAL NIKE BRAND REVENUES (3), FISCAL 2025 = $ 44,714. TOTAL NIKE BRAND REVENUES (3), % CHANGE = 1 %. TOTAL NIKE BRAND REVENUES (3), % CHANGE EXCLUDING CURRENCY CHANGES (1) = -1 %. TOTAL NIKE BRAND REVENUES (3), FISCAL 2024 = $ 49,322. TOTAL NIKE BRAND REVENUES (3), % CHANGE = -9 %. TOTAL NIKE BRAND REVENUES (3), % CHANGE EXCLUDING CURRENCY CHANGES (1) = -9 %. Converse, FISCAL 2026 = 1,174. Converse, FISCAL 2025 = 1,692. Converse, % CHANGE = -31 %. Converse, % CHANGE EXCLUDING CURRENCY CHANGES (1) = -32 %.",
+        "Nike-Inc-2026-10K: TOTAL NIKE BRAND REVENUES (3) | FISCAL 2026 = $ 45,222 | FISCAL 2025 = $ 44,714 | % CHANGE = -9 % | % CHANGE EXCLUDING CURRENCY CHANGES (1) = -9 % | FISCAL 2024 = $ 49,322.",
+        "Nike-Inc-2026-10K: TOTAL REVENUES | FISCAL 2026 = $ 20,511 | FISCAL 2025 = $ 19,572 | % CHANGE = -9 % | % CHANGE EXCLUDING CURRENCY CHANGES = -8 % | FISCAL 2024 = 21,396."
+      ],
+      "response": "Nike, Inc.’s total revenues for fiscal 2026 were **$46,398 million**【S1】【S2】.",
+      "reference": "$46,398 million (about $46.4 billion)."
+    },
+    {
+      "id": "q002",
+      "user_input": "What was NIKE's net income in fiscal 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: NET INCOME | YEAR ENDED MAY 31, 2026 = $ 3,108 | YEAR ENDED MAY 31, 2025 = $ 3,219 | YEAR ENDED MAY 31, 2024 = $ 5,700.",
+        "Nike-Inc-2026-10K: NET INCOME | FISCAL 2026 = $ 3,108 | FISCAL 2025 = $ 3,219 | % CHANGE = -44 % | FISCAL 2024 = 5,700.",
+        "Nike-Inc-2026-10K: NET INCOME | FISCAL 2026 = $ 3,108 | FISCAL 2025 = $ 3,219 | % CHANGE = -44 % | FISCAL 2024 = $ 5,700.",
+        "Nike-Inc-2026-10K: Net income | YEAR ENDED MAY 31, 2026 = $ 3,108 | YEAR ENDED MAY 31, 2025 = $ 3,219 | YEAR ENDED MAY 31, 2024 = $ 5,700.",
+        "Income tax expense, % CHANGE = -33 %. NET INCOME, FISCAL 2026 = $ 3,108. NET INCOME, FISCAL 2025 = $ 3,219. NET INCOME, % CHANGE = -3 %. NET INCOME, FISCAL 2024 = $ 5,700. NET INCOME, % CHANGE = -44 %. Total NIKE, Inc. Revenues, FISCAL 2026 = $ 46,398. Total NIKE, Inc. Revenues, FISCAL 2025 = $ 46,309. Total NIKE, Inc. Revenues, % CHANGE = 0 %. Total NIKE, Inc. Revenues, FISCAL 2024 = $ 51,362. Total NIKE, Inc. Revenues, % CHANGE = -10 %. Net income margin, FISCAL 2026 = 6.7 %. Net income margin, FISCAL 2025 = 7.0 %. Net income margin, % CHANGE = 11.1 %. Net income margin, FISCAL 2024 =."
+      ],
+      "response": "Nike’s net income for fiscal 2026 was **$3,108 million**【S1】【S2】【S3】【S4】【S5】.",
+      "reference": "$3,108 million."
+    },
+    {
+      "id": "q003",
+      "user_input": "What were NIKE's total assets as of May 31, 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: TOTAL ASSETS | MAY 31, 2026 = $ 38,410 | MAY 31, 2025 = $ 36,579.",
+        "Nike-Inc-2026-10K: Total current assets | MAY 31, 2026 = 24,603 | MAY 31, 2025 = 23,362.",
+        "Nike-Inc-2026-10K: TOTAL LONG-LIVED ASSETS | MAY 31, 2026 = $ 7,634 | MAY 31, 2025 = $ 7,540.",
+        "Nike-Inc-2026-10K: Total Level 2 | MAY 31, 2026.ASSETS AT FAIR VALUE = 6,539 | MAY 31, 2026.CASH AND EQUIVALENTS = 5,842 | MAY 31, 2026.SHORT-TERM INVESTMENTS = 697. TOTAL, MAY 31, 2026.ASSETS AT.",
+        "Nike-Inc-2026-10K: Total deferred tax assets | MAY 31, 2026 = 3,502 | MAY 31, 2025 = 3,318."
+      ],
+      "response": "Nike’s total assets as of May 31, 2026 were **$38,410 million**【S1】.",
+      "reference": "$38,410 million."
+    },
+    {
+      "id": "q004",
+      "user_input": "How much cash and equivalents did NIKE have at May 31, 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: TOTAL | MAY 31, 2026.CASH AND EQUIVALENTS = $ 7,563 | MAY 31, 2026.SHORT-TERM INVESTMENTS = $ 1,464.",
+        "Nike-Inc-2026-10K: Cash and equivalents, beginning of year | YEAR ENDED MAY 31, 2026 = 7,464. Cash and.",
+        "Nike-Inc-2026-10K: Cash and equivalents | MAY 31, 2026 = $ 7,563 | MAY 31, 2025 = $ 7,464.",
+        "Nike-Inc-2026-10K: Cash | MAY 31, 2026.ASSETS AT FAIR VALUE = $ 1,719 | MAY 31, 2026.CASH AND EQUIVALENTS = $ 1,719 | MAY 31, 2026.SHORT-TERM INVESTMENTS = $ -.",
+        "Nike-Inc-2026-10K: Total Level 2 | MAY 31, 2026.ASSETS AT FAIR VALUE = 6,539 | MAY 31, 2026.CASH AND EQUIVALENTS = 5,842 | MAY 31, 2026.SHORT-TERM INVESTMENTS = 697. TOTAL, MAY 31, 2026.ASSETS AT."
+      ],
+      "response": "Nike reported **$7,563 million** in cash and cash equivalents as of May 31, 2026【S3】.",
+      "reference": "$7,563 million."
+    },
+    {
+      "id": "q005",
+      "user_input": "What was NIKE's gross margin in fiscal 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 42.9 % | FISCAL 2025 = 42.7 % | FISCAL 2024 = 44.6 %.",
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 42.0 % | FISCAL 2025 = 44.0 % | % CHANGE = -190 bps | FISCAL 2024 = 45.9 %.",
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 41.8 % | FISCAL 2025 = 43.2 % | % CHANGE = -100 bps | FISCAL 2024 = 44.2 %.",
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 45.6 % | FISCAL 2025 = 43.5 % | % CHANGE = -90 bps | FISCAL 2024 = 44.4 %.",
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 43.8 % | FISCAL 2025 = 48.7 % | % CHANGE = -380 bps | FISCAL 2024 = 52.5 %."
+      ],
+      "response": "Nike’s overall gross margin for fiscal 2026 was **42.9 %**【S1】.",
+      "reference": "42.9%, an increase of 20 basis points from fiscal 2025."
+    },
+    {
+      "id": "q006",
+      "user_input": "What was NIKE's diluted earnings per share in fiscal 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Diluted earnings per common share | FISCAL 2026 = $ 2.10 | FISCAL 2025 = $ 2.16 | % CHANGE = -42 % | FISCAL 2024 = 3.73.",
+        "Nike-Inc-2026-10K: Diluted | YEAR ENDED MAY 31, 2026 = $ 2.10 | YEAR ENDED MAY 31, 2025 = $ 2.16 | YEAR ENDED MAY 31, 2024 = $ 3.73.",
+        "Nike-Inc-2026-10K: DILUTED WEIGHTED AVERAGE COMMON SHARES OUTSTANDING | YEAR ENDED MAY 31, 2026 = 1,481.0 | YEAR ENDED MAY 31, 2025 = 1,487.6 | YEAR ENDED MAY 31, 2024 = 1,529.7.",
+        "Nike-Inc-2026-10K: ($1.63 per share) and preferred stock ($0.10 per share) | RETAINED EARNINGS.(DEFICIT) = (2,430).",
+        "Nike-Inc-2026-10K: Dividends on common stock ($1.57 per share) and preferred stock ($0.10 per share) | RETAINED EARNINGS.(DEFICIT) = (2,337) | TOTAL = (2,337)."
+      ],
+      "response": "Nike’s diluted earnings per share for fiscal 2026 were **$2.10** per share【S1】【S2】.",
+      "reference": "$2.10."
+    },
+    {
+      "id": "q007",
+      "user_input": "Approximately how many employees did NIKE have worldwide as of May 31, 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Apparel | YEAR ENDED MAY 31, 2026.NORTH AMERICA = 6,075 | YEAR ENDED MAY 31, 2026.GREATER CHINA = 1,535 | YEAR ENDED MAY 31, 2026.GLOBAL BRAND DIVISIONS = - | YEAR ENDED MAY 31, 2026.TOTAL NIKE BRAND = 13,449 | YEAR ENDED MAY 31, 2026.CONVERSE = 48 | YEAR ENDED MAY 31, 2026.CORPORATE = -.",
+        "Nike-Inc-2026-10K: Other | YEAR ENDED MAY 31, 2026.NORTH AMERICA = - | YEAR ENDED MAY 31, 2026.GREATER CHINA = - | YEAR ENDED MAY 31, 2026.GLOBAL BRAND DIVISIONS = 49 | YEAR ENDED MAY 31, 2026.TOTAL NIKE BRAND = 49 | YEAR ENDED MAY 31, 2026.CONVERSE = 92 | YEAR ENDED MAY 31, 2026.CORPORATE = 2.",
+        "Nike-Inc-2026-10K: Other | YEAR ENDED MAY 31, 2026.NORTH AMERICA = - | YEAR ENDED MAY 31, 2026.GREATER CHINA = - | YEAR ENDED MAY 31, 2026.GLOBAL BRAND DIVISIONS = 49 | YEAR ENDED MAY 31, 2026.TOTAL NIKE BRAND = 49 | YEAR ENDED MAY 31, 2026.CONVERSE = 92 | YEAR ENDED MAY 31, 2026.CORPORATE = 2.",
+        "As of May 31, 2026, we had approximately 73,000 employees worldwide, including retail and part-time employees. We also utilize independent contractors and temporary personnel to supplement our workforce.",
+        "Nike-Inc-2026-10K: Sales through Direct to Consumer | YEAR ENDED MAY 31, 2026.NORTH AMERICA = 8,553 | YEAR ENDED MAY 31, 2026.GREATER CHINA = 2,592 | YEAR ENDED MAY 31, 2026.GLOBAL BRAND DIVISIONS = - | YEAR ENDED MAY 31, 2026.TOTAL NIKE BRAND = 17,720 | YEAR ENDED MAY 31, 2026.CONVERSE = 477."
+      ],
+      "response": "Nike had approximately **73,000 employees worldwide** as of May 31, 2026【S4】.",
+      "reference": "Approximately 73,000 employees, including retail and part-time employees."
+    },
+    {
+      "id": "q008",
+      "user_input": "How did NIKE's total revenues in fiscal 2026 compare with fiscal 2025?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: TOTAL REVENUES | FISCAL 2026 = $ 20,511 | FISCAL 2025 = $ 19,572 | % CHANGE = -9 % | % CHANGE EXCLUDING CURRENCY CHANGES = -8 % | FISCAL 2024 = 21,396.",
+        "Nike-Inc-2026-10K: TOTAL NIKE BRAND REVENUES (3) | FISCAL 2026 = $ 45,222 | FISCAL 2025 = $ 44,714 | % CHANGE = -9 % | % CHANGE EXCLUDING CURRENCY CHANGES (1) = -9 % | FISCAL 2024 = $ 49,322.",
+        "Income tax expense, % CHANGE = -33 %. NET INCOME, FISCAL 2026 = $ 3,108. NET INCOME, FISCAL 2025 = $ 3,219. NET INCOME, % CHANGE = -3 %. NET INCOME, FISCAL 2024 = $ 5,700. NET INCOME, % CHANGE = -44 %. Total NIKE, Inc. Revenues, FISCAL 2026 = $ 46,398. Total NIKE, Inc. Revenues, FISCAL 2025 = $ 46,309. Total NIKE, Inc. Revenues, % CHANGE = 0 %. Total NIKE, Inc. Revenues, FISCAL 2024 = $ 51,362. Total NIKE, Inc. Revenues, % CHANGE = -10 %. Net income margin, FISCAL 2026 = 6.7 %. Net income margin, FISCAL 2025 = 7.0 %. Net income margin, % CHANGE = 11.1 %. Net income margin, FISCAL 2024 =.",
+        "Nike-Inc-2026-10K: TOTAL REVENUES | FISCAL 2026 = $ 20,511 | FISCAL 2025 = $ 19,572 | % CHANGE = -9 % | % CHANGE EXCLUDING CURRENCY CHANGES = -8 % | FISCAL 2024 = $ 21,396.",
+        "Nike-Inc-2026-10K: TOTAL REVENUES | FISCAL 2026 = $ 6,243 | FISCAL 2025 = $ 6,251 | % CHANGE = -7 % | % CHANGE EXCLUDING CURRENCY CHANGES = -3 % | FISCAL 2024 = $ 6,729."
+      ],
+      "response": "Nike’s total revenues for fiscal 2026 were **$46,398 million**, compared with **$46,309 million** in fiscal 2025.  \nThis represents a very small increase of **$89 million** (≈ 0 % change) year‑over‑year.  \n\n[S3]",
+      "reference": "$46.4 billion vs $46.3 billion: flat on a reported basis and down 2% on a currency-neutral basis."
+    },
+    {
+      "id": "q009",
+      "user_input": "How did NIKE Brand wholesale revenues compare with NIKE Direct revenues in fiscal 2026 versus fiscal 2025?",
+      "retrieved_contexts": [
+        "- NIKE Direct revenues were $17.7 billion in fiscal 2026 compared to $18.8 billion in fiscal 2025, down 6% on a reported basis. On a currency-neutral basis, NIKE Direct revenues were down 8% due to declines in NIKE Brand Digital sales of 12% and declines in NIKE store sales of 4%. NIKE Brand Digital sales were $8.6 billion in fiscal 2026 compared to $9.6 billion in fiscal 2025, with declines primarily due to reduced traffic. NIKE store sales were $9.1 billion in fiscal 2026 compared to $9.2 billion in fiscal 2025. Comparable store sales decreased 4%. For additional information regarding comparable store sales, including the definition, see \"Comparable Store Sales\".",
+        "Sales to Wholesale Customers, FISCAL 2024 = $ 27,758. Sales to Wholesale Customers, % CHANGE = -7 %. Sales to Wholesale Customers, % CHANGE EXCLUDING CURRENCY CHANGES (1) = -6 %. Sales through NIKE Direct, FISCAL 2026 = 17,720. Sales through NIKE Direct, FISCAL 2025 = 18,783. Sales through NIKE Direct, % CHANGE = -6 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES (1) = -8 %. Sales through NIKE Direct, FISCAL 2024 = 21,519. Sales through NIKE Direct, % CHANGE = -13 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES (1) = -12 %. Global Brand Divisions (2), FISCAL 2026 = 49. Global Brand Divisions (2), FISCAL 2025 = 48.",
+        "Details:, % CHANGE =. Supplemental NIKE Brand Revenues Details:, % CHANGE EXCLUDING CURRENCY CHANGES (1) =. NIKE Brand Revenues by:, FISCAL 2026 =. NIKE Brand Revenues by:, FISCAL 2025 =. NIKE Brand Revenues by:, % CHANGE =. NIKE Brand Revenues by:, % CHANGE EXCLUDING CURRENCY CHANGES (1) =. NIKE Brand Revenues by:, FISCAL 2024 =. NIKE Brand Revenues by:, % CHANGE =. NIKE Brand Revenues by:, % CHANGE EXCLUDING CURRENCY CHANGES (1) =. Sales to Wholesale Customers, FISCAL 2026 = $ 27,453. Sales to Wholesale Customers, FISCAL 2025 = $ 25,883. Sales to Wholesale Customers, % CHANGE = 6 %. Sales to Wholesale Customers, % CHANGE EXCLUDING CURRENCY CHANGES (1) = 4 %.",
+        "FISCAL 2024 = $ 4,262. Sales to Wholesale Customers, % CHANGE = -13 %. Sales to Wholesale Customers, % CHANGE EXCLUDING CURRENCY CHANGES = -13 %. Sales through NIKE Direct, FISCAL 2026 = 2,592. Sales through NIKE Direct, FISCAL 2025 = 2,887. Sales through NIKE Direct, % CHANGE = -10 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES = -12 %. Sales through NIKE Direct, FISCAL 2024 = 3,283. Sales through NIKE Direct, % CHANGE = -12 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES = -12 %. TOTAL REVENUES, FISCAL 2026 = $ 5,847. TOTAL REVENUES, FISCAL 2025 = $ 6,586. TOTAL REVENUES, % CHANGE = -11 %.",
+        "Global Brand Divisions (2), % CHANGE = 2 %. Global Brand Divisions (2), % CHANGE EXCLUDING CURRENCY CHANGES (1) = 2 %. Global Brand Divisions (2), FISCAL 2024 = 45. Global Brand Divisions (2), % CHANGE = 7 %. Global Brand Divisions (2), % CHANGE EXCLUDING CURRENCY CHANGES (1) = 10 %. TOTAL NIKE BRAND REVENUES (3), FISCAL 2026 = $ 45,222. TOTAL NIKE BRAND REVENUES (3), FISCAL 2025 = $ 44,714. TOTAL NIKE BRAND REVENUES (3), % CHANGE = 1 %. TOTAL NIKE BRAND REVENUES (3), % CHANGE EXCLUDING CURRENCY CHANGES (1) = -1 %. TOTAL NIKE BRAND REVENUES (3), FISCAL 2024 = $."
+      ],
+      "response": "**NIKE Brand wholesale vs. NIKE Direct revenues**\n\n| Fiscal year | NIKE Brand wholesale revenues | NIKE Direct revenues | Difference (Direct – Wholesale) |\n|-------------|------------------------------|----------------------|---------------------------------|\n| 2025 | **$25.883 billion** | **$18.783 billion** | –$7.100 billion |\n| 2026 | **$27.453 billion** | **$17.720 billion** | –$9.733 billion |\n\n**Key points**\n\n1. **Wholesale revenues were higher than Direct revenues in both years.**  \n   - 2025: Wholesale exceeded Direct by $7.1 billion.  \n   - 2026: Wholesale exceeded Direct by $9.7 billion.\n\n2. **Trend over the two‑year period**  \n   - Wholesale revenues grew from $25.883 billion in 2025 to $27.453 billion in 2026, an increase of about **$1.57 billion** (≈ 6 % growth).  \n   - Direct revenues fell from $18.783 billion in 2025 to $17.720 billion in 2026, a decline of about **$1.06 billion** (≈ 6 % drop).  \n\nThus, while NIKE’s wholesale channel remained larger than its Direct channel, the gap widened in 2026 as wholesale grew and Direct contracted.  \n\n**Sources**  \n- NIKE Direct revenues: $17.7 billion (2026) vs. $18.8 billion (2025) – [S1]  \n- NIKE Brand wholesale revenues: $27.453 billion (2026) vs. $25.883 billion (2025) – [S3]",
+      "reference": "Wholesale rose from $25.9 billion to $27.5 billion, while NIKE Direct fell from $18.8 billion to $17.7 billion (down 6% reported), primarily due to a decrease in traffic."
+    },
+    {
+      "id": "q010",
+      "user_input": "How did NIKE's net income change from fiscal 2025 to fiscal 2026?",
+      "retrieved_contexts": [
+        "Income tax expense, % CHANGE = -33 %. NET INCOME, FISCAL 2026 = $ 3,108. NET INCOME, FISCAL 2025 = $ 3,219. NET INCOME, % CHANGE = -3 %. NET INCOME, FISCAL 2024 = $ 5,700. NET INCOME, % CHANGE = -44 %. Total NIKE, Inc. Revenues, FISCAL 2026 = $ 46,398. Total NIKE, Inc. Revenues, FISCAL 2025 = $ 46,309. Total NIKE, Inc. Revenues, % CHANGE = 0 %. Total NIKE, Inc. Revenues, FISCAL 2024 = $ 51,362. Total NIKE, Inc. Revenues, % CHANGE = -10 %. Net income margin, FISCAL 2026 = 6.7 %. Net income margin, FISCAL 2025 = 7.0 %. Net income margin, % CHANGE = 11.1 %. Net income margin, FISCAL 2024 =.",
+        "Nike-Inc-2026-10K: NET INCOME | FISCAL 2026 = $ 3,108 | FISCAL 2025 = $ 3,219 | % CHANGE = -44 % | FISCAL 2024 = 5,700.",
+        "Nike-Inc-2026-10K: NET INCOME | FISCAL 2026 = $ 3,108 | FISCAL 2025 = $ 3,219 | % CHANGE = -44 % | FISCAL 2024 = $ 5,700.",
+        "Nike-Inc-2026-10K: NET INCOME | YEAR ENDED MAY 31, 2026 = $ 3,108 | YEAR ENDED MAY 31, 2025 = $ 3,219 | YEAR ENDED MAY 31, 2024 = $ 5,700.",
+        "Nike-Inc-2026-10K: Net income | YEAR ENDED MAY 31, 2026 = $ 3,108 | YEAR ENDED MAY 31, 2025 = $ 3,219 | YEAR ENDED MAY 31, 2024 = $ 5,700."
+      ],
+      "response": "Nike’s net income decreased from fiscal 2025 to fiscal 2026 by **$111 million** (from $3,219 million in 2025 to $3,108 million in 2026).  \nThis represents a **‑3 %** change in net income over the two‑year period.  \n\nSources: [S1], [S2], [S3], [S4], [S5]",
+      "reference": "It decreased 3%, from $3,219 million to $3,108 million."
+    },
+    {
+      "id": "q011",
+      "user_input": "How did Greater China revenues change in fiscal 2026 compared with fiscal 2025?",
+      "retrieved_contexts": [
+        "Apparel, % CHANGE = -12 %. Apparel, % CHANGE EXCLUDING CURRENCY CHANGES = -12 %. Equipment, FISCAL 2026 = 124. Equipment, FISCAL 2025 = 165. Equipment, % CHANGE = -25 %. Equipment, % CHANGE EXCLUDING CURRENCY CHANGES = -26 %. Equipment, FISCAL 2024 = 165. Equipment, % CHANGE = 0 %. Equipment, % CHANGE EXCLUDING CURRENCY CHANGES = 1 %. TOTAL REVENUES, FISCAL 2026 = $ 5,847. TOTAL REVENUES, FISCAL 2025 = $ 6,586. TOTAL REVENUES, % CHANGE = -11 %. TOTAL REVENUES, % CHANGE EXCLUDING CURRENCY CHANGES = -13 %. TOTAL REVENUES, FISCAL 2024 = $ 7,545. TOTAL REVENUES, % CHANGE = -13 %. TOTAL REVENUES, % CHANGE EXCLUDING CURRENCY CHANGES = -12 %. Revenues by:, FISCAL 2026 =.",
+        "Nike-Inc-2026-10K: TOTAL REVENUES | FISCAL 2026 = $ 5,847 | FISCAL 2025 = $ 6,586 | % CHANGE = -13 % | % CHANGE EXCLUDING CURRENCY CHANGES = -12 % | FISCAL 2024 = $ 7,545.",
+        "Nike-Inc-2026-10K: TOTAL REVENUES | FISCAL 2026 = $ 5,847 | FISCAL 2025 = $ 6,586 | % CHANGE = -13 % | % CHANGE EXCLUDING CURRENCY CHANGES = -12 % | FISCAL 2024 = $ 7,545.",
+        "Revenues by:, FISCAL 2025 =. Revenues by:, % CHANGE =. Revenues by:, % CHANGE EXCLUDING CURRENCY CHANGES =. Revenues by:, FISCAL 2024 =. Revenues by:, % CHANGE =. Revenues by:, % CHANGE EXCLUDING CURRENCY CHANGES =. Sales to Wholesale Customers, FISCAL 2026 = $ 3,255. Sales to Wholesale Customers, FISCAL 2025 = $ 3,699. Sales to Wholesale Customers, % CHANGE = -12 %. Sales to Wholesale Customers, % CHANGE EXCLUDING CURRENCY CHANGES = -14 %. Sales to Wholesale Customers,.",
+        "Revenues by:, FISCAL 2026 =. Revenues by:, FISCAL 2025 =. Revenues by:, % CHANGE =. Revenues by:, % CHANGE EXCLUDING CURRENCY CHANGES =. Revenues by:, FISCAL 2024 =. Revenues by:, % CHANGE =. Revenues by:, % CHANGE EXCLUDING CURRENCY CHANGES =. Footwear, FISCAL 2026 = $ 4,188. Footwear, FISCAL 2025 = $ 4,805. Footwear, % CHANGE = -13 %. Footwear, % CHANGE EXCLUDING CURRENCY CHANGES = -15 %. Footwear, FISCAL 2024 = $ 5,552. Footwear, % CHANGE = -13 %. Footwear, % CHANGE EXCLUDING CURRENCY CHANGES = -13 %. Apparel, FISCAL 2026 = 1,535. Apparel, FISCAL 2025 = 1,616. Apparel, % CHANGE = -5 %. Apparel, % CHANGE EXCLUDING CURRENCY CHANGES = -7 %. Apparel, FISCAL 2024 = 1,828."
+      ],
+      "response": "Greater China revenues fell in fiscal 2026 compared with fiscal 2025.  \n- **Absolute change:** $5,847 million (2026) vs. $6,586 million (2025) → a decline of **$739 million**.  \n- **Percentage change:** **‑13 %** year‑over‑year.  \n\n[S2] (Nike‑Inc‑2026‑10K, Greater China – Total Revenues) shows the $5,847 million and $6,586 million figures and the –13 % change.",
+      "reference": "They fell 11% on a reported basis (13% currency-neutral), from $6,586 million to $5,847 million."
+    },
+    {
+      "id": "q012",
+      "user_input": "How did NIKE's inventories at May 31, 2026 compare with the prior year?",
+      "retrieved_contexts": [
+        "AFRICA = 2,253. Inventories (3), GREATER CHINA = 793. Inventories (3), ASIA PACIFIC & LATIN AMERICA = 964. Inventories (3), GLOBAL BRAND DIVISIONS = 166. Inventories (3), TOTAL NIKE BRAND = 7,496. Inventories (3), CONVERSE = 171. Inventories (3), CORPORATE = (166). Inventories (3), TOTAL NIKE, INC. = $ 7,501",
+        "3,198. Inventories (3), EUROPE, MIDDLE EAST & AFRICA = 2,042. Inventories (3), GREATER CHINA = 951. Inventories (3), ASIA PACIFIC & LATIN AMERICA = 905. Inventories (3), GLOBAL BRAND DIVISIONS = 148. Inventories (3), TOTAL NIKE BRAND = 7,244. Inventories (3), CONVERSE = 272. Inventories (3), CORPORATE = (27). Inventories (3), TOTAL NIKE, INC. = $ 7,489",
+        "Nike-Inc-2026-10K: Inventories | MAY 31, 2026 = 7,501 | MAY 31, 2025 = 7,489.",
+        "(3), NORTH AMERICA = $ 3,134. Inventories (3), EUROPE, MIDDLE EAST & AFRICA = 2,028. Inventories (3), GREATER CHINA = 1,070. Inventories (3), ASIA PACIFIC & LATIN AMERICA = 810. Inventories (3), GLOBAL BRAND DIVISIONS = 166. Inventories (3), TOTAL NIKE BRAND = 7,208. Inventories (3), CONVERSE = 296. Inventories (3), CORPORATE = 15. Inventories (3), TOTAL NIKE, INC. = $ 7,519",
+        "Nike-Inc-2026-10K: Inventories (3), TOTAL NIKE | INC = $ 7,501."
+      ],
+      "response": "Nike’s inventories at the end of the fiscal year 2026 were **$7,501 million** (millions of U.S. dollars)【S1】【S5】.  \nFor the prior year, the inventories were **$7,489 million**【S2】.\n\n**Change from 2025 to 2026**\n\n| Item | 2025 | 2026 | Difference | % Change |\n|------|------|------|------------|----------|\n| Total Nike, Inc. inventories (May 31) | $7,489 m | $7,501 m | +$12 m | +0.16 % |\n\nThus, Nike’s inventories increased by **$12 million** (about **0.16 %**) from May 31, 2025 to May 31, 2026.",
+      "reference": "Inventories were $7.5 billion, flat versus the prior year ($7,501 million vs $7,489 million), reflecting an increase in units offset by product mix."
+    },
+    {
+      "id": "q013",
+      "user_input": "What were NIKE's revenues in fiscal 2024, 2025 and 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Revenues | FISCAL 2026 = $ 46,398 | FISCAL 2025 = $ 46,309 | % CHANGE = -10 % | FISCAL 2024 = $ 51,362.",
+        "Nike-Inc-2026-10K: REVENUES | FISCAL 2026 = $ 46,398 | FISCAL 2025 = $ 46,309 | % CHANGE = -10 % | % CHANGE EXCLUDING CURRENCY CHANGES (1) = -9 % | FISCAL 2024 = $ 51,362.",
+        "Nike-Inc-2026-10K: Revenues | FISCAL 2026 = $ 46,398 | FISCAL 2025 = $ 46,309 | % CHANGE = -10 % | FISCAL 2024 = 51,362.",
+        "Nike-Inc-2026-10K: TOTAL NIKE BRAND REVENUES (3) | FISCAL 2026 = $ 45,222 | FISCAL 2025 = $ 44,714 | % CHANGE = -9 % | % CHANGE EXCLUDING CURRENCY CHANGES (1) = -9 % | FISCAL 2024 = $ 49,322.",
+        "Nike-Inc-2026-10K: REVENUES | FISCAL 2026 = $ 46,398 | FISCAL 2025 = $ 46,309 | % CHANGE = -10 % | % CHANGE EXCLUDING CURRENCY CHANGES (1) = -9 % | FISCAL 2024 = $ 51,362."
+      ],
+      "response": "Nike’s reported revenues were:\n\n| Fiscal year | Revenue (in millions of U.S. dollars) |\n|-------------|----------------------------------------|\n| 2024 | **$51,362** |\n| 2025 | **$46,309** |\n| 2026 | **$46,398** |\n\nThese figures are taken from Nike’s 2026 Form 10‑K, where the “Revenues” line lists $51,362 for FY 2024, $46,309 for FY 2025, and $46,398 for FY 2026【S1】【S2】.",
+      "reference": "FY2024: $51,362 million; FY2025: $46,309 million; FY2026: $46,398 million."
+    },
+    {
+      "id": "q015",
+      "user_input": "What was NIKE's gross margin in fiscal 2024, 2025 and 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 45.6 % | FISCAL 2025 = 43.5 % | % CHANGE = -90 bps | FISCAL 2024 = 44.4 %.",
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 42.9 % | FISCAL 2025 = 42.7 % | FISCAL 2024 = 44.6 %.",
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 42.0 % | FISCAL 2025 = 44.0 % | % CHANGE = -190 bps | FISCAL 2024 = 45.9 %.",
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 41.8 % | FISCAL 2025 = 43.2 % | % CHANGE = -100 bps | FISCAL 2024 = 44.2 %.",
+        "Nike-Inc-2026-10K: Gross margin | FISCAL 2026 = 45.7 % | FISCAL 2025 = 46.0 % | % CHANGE = -420 bps | FISCAL 2024 = 50.2 %."
+      ],
+      "response": "**Nike Inc. – Gross Margin (overall)**  \n\n| Fiscal year | Gross margin |\n|-------------|--------------|\n| 2024 | **44.6 %** |\n| 2025 | **42.7 %** |\n| 2026 | **42.9 %** |\n\nThese figures are taken from Nike’s “Results of Operations” table in the 2026 Form 10‑K, which reports the company‑wide gross margin for each fiscal year.  \n\n*Source: [S2]*",
+      "reference": "FY2024: 44.6%; FY2025: 42.7%; FY2026: 42.9%."
+    },
+    {
+      "id": "q017",
+      "user_input": "How much cash did NIKE's operations provide in fiscal 2024, 2025 and 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Cash provided (used) by operations | YEAR ENDED MAY 31, 2026 = 2,868 | YEAR ENDED MAY 31, 2025 = 3,698 | YEAR ENDED MAY 31, 2024 = 7,429.",
+        "Nike-Inc-2026-10K: Operations | FISCAL 2026 = $ 2,868 | FISCAL 2025 = $ 3,698.",
+        "Nike-Inc-2026-10K: Operating cash flows from operating leases | YEAR ENDED MAY 31, 2026 = $ 668 | YEAR ENDED MAY 31, 2025 = $ 647 | YEAR ENDED MAY 31, 2024 = $ 613.",
+        "Nike-Inc-2026-10K: Cash provided (used) by financing activities | YEAR ENDED MAY 31, 2026 = (2,292) | YEAR ENDED MAY 31, 2025 = (5,820) | YEAR ENDED MAY 31, 2024 = (5,888).",
+        "Nike-Inc-2026-10K: Cash provided (used) by investing activities | YEAR ENDED MAY 31, 2026 = (488) | YEAR ENDED MAY 31, 2025 = (275) | YEAR ENDED MAY 31, 2024 = 894."
+      ],
+      "response": "Nike’s consolidated cash flow statement shows the cash generated by operating activities as follows:\n\n| Fiscal year | Cash provided by operations (in $ millions) |\n|-------------|---------------------------------------------|\n| 2024 | 7,429 [ S1 ] |\n| 2025 | 3,698 [ S1 ] |\n| 2026 | 2,868 [ S1 ] |\n\nThese amounts represent the net cash that Nike’s operations supplied during each fiscal year.",
+      "reference": "FY2024: $7,429 million; FY2025: $3,698 million; FY2026: $2,868 million."
+    },
+    {
+      "id": "q018",
+      "user_input": "What was NIKE's total shareholders' equity at May 31, 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Total shareholders' equity | MAY 31, 2026 = 14,865 | MAY 31, 2025 = 13,213.",
+        "Nike-Inc-2026-10K: TOTAL LIABILITIES AND SHAREHOLDERS' EQUITY | MAY 31, 2026 = $ 38,410 | MAY 31, 2025 = $ 36,579.",
+        "Nike-Inc-2026-10K: Balance at May 31, 2024 | TOTAL = $ 14,430.",
+        "Nike-Inc-2026-10K: Add: Shareholders' equity, AVERAGE FOR THE TRAILING FIVE QUARTERS ENDED.MAY 31 | 2026 = 13,944 | 2025 = 13,926.",
+        "Nike-Inc-2026-10K: Balance at May 31, 2026 | COMMON STOCK.CLASS A.SHARES = 281 | COMMON STOCK.CLASS A.AMOUNT = $ - | COMMON STOCK.CLASS B.SHARES = 1,202 | COMMON STOCK.CLASS B.AMOUNT = $ 3 | CAPITAL IN EXCESS.OF STATED.VALUE = $ 15,158 | ACCUMULATED.OTHER COMPREHENSIVE.INCOME (LOSS) = $ (141) | RETAINED EARNINGS.(DEFICIT) = $ (155) | TOTAL = $ 14,865."
+      ],
+      "response": "Nike’s total shareholders’ equity at the close of the fiscal year on May 31, 2026 was **$14,865 million**【S1】【S5】.",
+      "reference": "$14,865 million."
+    },
+    {
+      "id": "q019",
+      "user_input": "What were NIKE's total current liabilities at May 31, 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Total current liabilities | MAY 31, 2026 = 12,547 | MAY 31, 2025 = 10,566.",
+        "Nike-Inc-2026-10K: TOTAL ACCRUED LIABILITIES | MAY 31, 2026 = $ 6,092 | MAY 31, 2025 = $ 5,916.",
+        "Nike-Inc-2026-10K: TOTAL LIABILITIES AND SHAREHOLDERS' EQUITY | MAY 31, 2026 = $ 38,410 | MAY 31, 2025 = $ 36,579.",
+        "Nike-Inc-2026-10K: Total current assets | MAY 31, 2026 = 24,603 | MAY 31, 2025 = 23,362.",
+        "Nike-Inc-2026-10K: TOTAL | MAY 31, 2026.DERIVATIVE LIABILITIES.ACCRUED LIABILITIES = $ 271 | MAY 31, 2026.DERIVATIVE LIABILITIES.OTHER LONG-TERM LIABILITIES = $ 72."
+      ],
+      "response": "Nike’s total current liabilities at May 31, 2026 were **$12,547 million**【S1】.",
+      "reference": "$12,547 million."
+    },
+    {
+      "id": "q020",
+      "user_input": "What was NIKE's long-term debt (excluding the current portion) at May 31, 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Current portion of long-term debt | MAY 31, 2026 = $ 2,000 | MAY 31, 2025 = $ -.",
+        "Nike-Inc-2026-10K: Less Current portion of long-term debt, BOOK VALUE OUTSTANDING AS OF MAY 31 | 2026 = 2,000 | 2025 = -.",
+        "Nike-Inc-2026-10K: TOTAL LONG-TERM DEBT, BOOK VALUE OUTSTANDING AS OF MAY 31 | 2026 = $ 5,942. TOTAL LONG-TERM DEBT, BOOK.",
+        "Nike-Inc-2026-10K: Long-term debt | MAY 31, 2026 = 5,942 | MAY 31, 2025 = 7,961.",
+        "Nike-Inc-2026-10K: November 1, 2045 (3), BOOK VALUE OUTSTANDING AS OF MAY 31 | 2026 = 987 | 2025 = 997."
+      ],
+      "response": "Nike’s long‑term debt **excluding the current portion** as of May 31, 2026 was **$3,942 million**.\n\n- Total long‑term debt (including the current portion): $5,942 million【S3】【S4】  \n- Current portion of long‑term debt: $2,000 million【S1】【S2】\n\nSubtracting the current portion from the total gives:\n\n$5,942 million – $2,000 million = **$3,942 million**【S3】【S1】",
+      "reference": "$5,942 million (with an additional $2,000 million classified as current portion)."
+    },
+    {
+      "id": "q021",
+      "user_input": "How much did NIKE pay in dividends (common and preferred) in fiscal 2026?",
+      "retrieved_contexts": [
+        "Nike-Inc-2026-10K: Dividends on common stock ($1.57 per share) and preferred stock ($0.10 per share) | COMMON STOCK.CLASS A.AMOUNT = Dividends on common stock ($1.57 per.",
+        "Nike-Inc-2026-10K: Dividends - common and preferred | YEAR ENDED MAY 31, 2026 = (2,407) | YEAR ENDED MAY 31, 2025 = (2,300) | YEAR ENDED MAY 31, 2024 = (2,169).",
+        "Nike-Inc-2026-10K: Dividends on common stock ($1.57 per share) and preferred stock ($0.10 per share) | RETAINED EARNINGS.(DEFICIT) = (2,337) | TOTAL = (2,337).",
+        "Nike-Inc-2026-10K: Dividends on common stock ($1.63 per share) and preferred stock ($0.10 per share) | TOTAL = (2,430).",
+        "Nike-Inc-2026-10K: Dividends on common stock ($1.45 per share) and preferred stock ($0.10 per share) | RETAINED EARNINGS.(DEFICIT) = (2,203) | TOTAL = (2,203)."
+      ],
+      "response": "Nike paid **$2.407 billion** in dividends (common and preferred) during fiscal year 2026 (year ended May 31, 2026). This figure represents the cash outflow for dividends and is reported as a negative amount in the consolidated statements of cash flows.  \n\nSource: [S2]",
+      "reference": "$2,407 million."
+    },
+    {
+      "id": "q023",
+      "user_input": "How does NIKE define comparable store sales?",
+      "retrieved_contexts": [
+        "Comparable store sales: This key metric, which excludes NIKE Brand Digital sales, comprises revenues from NIKE-owned inline and factory stores for which all three of the following requirements have been met: (1) the store has been open at least one year, (2) square footage has not changed by more than 15% within the past year and (3) the store has not been permanently repositioned within the past year. Comparable store sales represents a performance metric that we believe is useful information for management and investors in understanding the performance of our established NIKE-owned in-line and factory stores. Management considers this metric when making financial and operating decisions. The method of calculating comparable store sales varies across the retail industry. As a result, our calculation of this metric may not be comparable to similarly titled metrics used by other companies.",
+        "- NIKE Direct revenues were $17.7 billion in fiscal 2026 compared to $18.8 billion in fiscal 2025, down 6% on a reported basis. On a currency-neutral basis, NIKE Direct revenues were down 8% due to declines in NIKE Brand Digital sales of 12% and declines in NIKE store sales of 4%. NIKE Brand Digital sales were $8.6 billion in fiscal 2026 compared to $9.6 billion in fiscal 2025, with declines primarily due to reduced traffic. NIKE store sales were $9.1 billion in fiscal 2026 compared to $9.2 billion in fiscal 2025. Comparable store sales decreased 4%. For additional information regarding comparable store sales, including the definition, see \"Comparable Store Sales\".",
+        "- North America revenues increased 5% on a currency-neutral basis. Wholesale revenues increased 14% including expanded distribution, higher shipments to existing partners and fewer marketplace management actions taken in the current year. NIKE Direct revenues decreased 6% due to declines in digital sales of 10% and declines in store sales of 2%. Comparable store sales decreased 2%.\n- Footwear revenues increased 5% on a currency-neutral basis. Unit sales of footwear increased 6%, while lower ASP per pair reduced footwear revenues by approximately 1 percentage point. Lower ASP per pair was primarily due to channel mix, partially offset by product mix and strategic pricing.\n- Apparel revenues increased 4% on a currency-neutral basis. Unit sales of apparel increased 2%, while higher ASP per unit contributed approximately 2 percentage points of apparel revenue growth. Higher ASP per unit was primarily due to product mix, partially offset by channel mix.",
+        "- Greater China revenues decreased 13% on a currency-neutral basis. Wholesale revenues decreased 14%, reflecting our actions to prioritize marketplace health. NIKE Direct revenues decreased 12% due to declines in digital sales of 29% and declines in store sales of 4%. Comparable store sales decreased 6%.\n- Footwear revenues decreased 15% on a currency-neutral basis. Unit sales of footwear decreased 14%, while lower ASP per pair reduced footwear revenues by approximately 1 percentage point. Lower ASP per pair was primarily due to channel mix and product mix, partially offset by lower discounts.\n- Apparel revenues decreased 7% on a currency-neutral basis. Unit sales of apparel decreased 8%, while higher ASP per unit contributed approximately 1 percentage point of apparel revenue growth. Higher ASP per unit was primarily due to product mix, partially offset by channel mix.",
+        "- EMEA revenues decreased 3% on a currency-neutral basis. Wholesale revenues were flat. NIKE Direct revenues decreased 9% due to declines in digital sales of 10% and declines in store sales of 8%. Comparable store sales decreased 7%.\n- Footwear revenues decreased 5% on a currency-neutral basis. Unit sales of footwear decreased 2%, while lower ASP per pair reduced footwear revenues by approximately 3 percentage points. Lower ASP per pair was primarily due to higher discounts, partially offset by product mix.\n- Apparel revenues were flat on a currency-neutral basis. Unit sales of apparel increased 1%, while lower ASP per unit reduced apparel revenues by approximately 1 percentage point. Lower ASP per unit was primarily due to higher discounts, partially offset by product mix."
+      ],
+      "response": "Nike defines **comparable store sales** as the revenue generated from Nike‑owned inline and factory stores that meet all of the following criteria:\n\n1. The store has been open for at least one year.  \n2. The store’s square footage has not changed by more than 15% within the past year.  \n3. The store has not been permanently repositioned within the past year.  \n\nThis metric excludes Nike Brand Digital sales and is used to assess the performance of Nike’s established in‑line and factory stores. [S1]",
+      "reference": "Revenues from NIKE-owned in-line and factory stores (excluding NIKE Brand Digital) that have been open at least one year, whose square footage has not changed by more than 15% in the past year, and that have not been permanently repositioned within the past year."
+    },
+    {
+      "id": "q024",
+      "user_input": "How does NIKE calculate EBIT?",
+      "retrieved_contexts": [
+        "Earnings Before Interest and Taxes (\"EBIT\") and EBIT margin: Calculated as Net income before Interest (income) expense, net and Income tax expense in the Consolidated Statements of Income and total NIKE, Inc. EBIT divided by total NIKE, Inc. Revenues in the Consolidated Statements of Income, respectively. Total NIKE, Inc. EBIT and EBIT margin calculations in fiscal 2026, 2025 and 2024 are as follows:",
+        "Nike-Inc-2026-10K: EBIT (1) | FISCAL 2026 = $ 3,850 | FISCAL 2025 = $ 3,778 | % CHANGE = -42 % | FISCAL 2024 = $ 6,539.",
+        "INC. EBIT (1), FISCAL 2026 = $ 3,850. TOTAL NIKE, INC. EBIT (1), FISCAL 2025 = $ 3,778. TOTAL NIKE, INC. EBIT (1), % CHANGE = 2 %. TOTAL NIKE, INC. EBIT (1), FISCAL 2024 = $ 6,539. TOTAL NIKE, INC. EBIT (1), % CHANGE = -42 %. Interest (income) expense, net, FISCAL 2026 = (50). Interest (income) expense, net, FISCAL 2025 = (107). Interest (income) expense, net, % CHANGE = -. Interest (income) expense, net, FISCAL 2024 = (161). Interest (income) expense, net, % CHANGE = -. Income tax expense, FISCAL 2026 = 792. Income tax expense, FISCAL 2025 = 666. Income tax expense, % CHANGE = 19 %. Income tax expense, FISCAL 2024 = 1,000.",
+        "Nike-Inc-2026-10K: EBIT margin (1) | FISCAL 2026 = 8.3 % | FISCAL 2025 = 8.2 % | FISCAL 2024 = 12.7 %.",
+        "Nike-Inc-2026-10K: EBIT, FOR THE TRAILING FOUR QUARTERS ENDED.MAY 31 | 2026 = 3,850 | 2025 = 3,778."
+      ],
+      "response": "Nike defines **EBIT (Earnings Before Interest and Taxes)** as the company’s net income **before** deducting interest (income) expense and income tax expense. In other words:\n\n- **EBIT = Net income – Interest (income) expense, net – Income tax expense**  \n  (All figures are taken from the Consolidated Statements of Income.)\n\nThe company then calculates the **EBIT margin** by dividing EBIT by total Nike, Inc. revenues:\n\n- **EBIT margin = EBIT ÷ Total revenues**\n\nThese definitions are provided in Nike’s 2026 Form 10‑K under the “Use of Non‑GAAP Financial Measures” section. [S1]",
+      "reference": "Net income before Interest (income) expense, net and Income tax expense; EBIT margin is total EBIT divided by total revenues."
+    },
+    {
+      "id": "q025",
+      "user_input": "Which reportable segment had the highest EBIT in fiscal 2026, and how did it change from fiscal 2025?",
+      "retrieved_contexts": [
+        "INC. EBIT (1), FISCAL 2026 = $ 3,850. TOTAL NIKE, INC. EBIT (1), FISCAL 2025 = $ 3,778. TOTAL NIKE, INC. EBIT (1), % CHANGE = 2 %. TOTAL NIKE, INC. EBIT (1), FISCAL 2024 = $ 6,539. TOTAL NIKE, INC. EBIT (1), % CHANGE = -42 %. Interest (income) expense, net, FISCAL 2026 = (50). Interest (income) expense, net, FISCAL 2025 = (107). Interest (income) expense, net, % CHANGE = -. Interest (income) expense, net, FISCAL 2024 = (161). Interest (income) expense, net, % CHANGE = -. Income tax expense, FISCAL 2026 = 792. Income tax expense, FISCAL 2025 = 666. Income tax expense, % CHANGE = 19 %. Income tax expense, FISCAL 2024 = 1,000.",
+        "Net income margin, % CHANGE =. EBIT margin (1), FISCAL 2026 = 8.3 %. EBIT margin (1), FISCAL 2025 = 8.2 %. EBIT margin (1), % CHANGE =. EBIT margin (1), FISCAL 2024 = 12.7 %. EBIT margin (1), % CHANGE =.",
+        "Reported EBIT decreased 6% reflecting higher reported revenues and the following:",
+        "Nike-Inc-2026-10K: EBIT (1) | FISCAL 2026 = $ 3,850 | FISCAL 2025 = $ 3,778 | % CHANGE = -42 % | FISCAL 2024 = $ 6,539.",
+        "Reported EBIT increased 14% reflecting higher reported revenues and the following:"
+      ],
+      "response": "The context you provided contains only the **total** EBIT for Nike, Inc. (the consolidated figure) and does not break down EBIT by individual reportable segment. Therefore, I cannot identify which specific segment had the highest EBIT in fiscal 2026, nor can I provide the change from fiscal 2025 for any segment.  \n\nIf you have a segment‑level table or additional excerpts that list EBIT by segment, please share them and I’ll be happy to analyze the information.",
+      "reference": "North America, with EBIT of $5,376 million, up 14% from $4,735 million."
+    },
+    {
+      "id": "q026",
+      "user_input": "Why did NIKE Direct revenues decline in fiscal 2026 and which components fell?",
+      "retrieved_contexts": [
+        "- NIKE Direct revenues were $17.7 billion in fiscal 2026 compared to $18.8 billion in fiscal 2025, down 6% on a reported basis. On a currency-neutral basis, NIKE Direct revenues were down 8% due to declines in NIKE Brand Digital sales of 12% and declines in NIKE store sales of 4%. NIKE Brand Digital sales were $8.6 billion in fiscal 2026 compared to $9.6 billion in fiscal 2025, with declines primarily due to reduced traffic. NIKE store sales were $9.1 billion in fiscal 2026 compared to $9.2 billion in fiscal 2025. Comparable store sales decreased 4%. For additional information regarding comparable store sales, including the definition, see \"Comparable Store Sales\".",
+        "Nike-Inc-2026-10K: Sales through NIKE Direct | FISCAL 2026 = 17,720 | FISCAL 2025 = 18,783 | % CHANGE = -13 % | % CHANGE EXCLUDING CURRENCY CHANGES (1) = -12 % | FISCAL 2024 = 21,519.",
+        "$ 11,004. Sales to Wholesale Customers, % CHANGE = -5 %. Sales to Wholesale Customers, % CHANGE EXCLUDING CURRENCY CHANGES = -5 %. Sales through NIKE Direct, FISCAL 2026 = 8,553. Sales through NIKE Direct, FISCAL 2025 = 9,088. Sales through NIKE Direct, % CHANGE = -6 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES = -6 %. Sales through NIKE Direct, FISCAL 2024 = 10,392. Sales through NIKE Direct, % CHANGE = -13 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES = -12 %. TOTAL REVENUES, FISCAL 2026 = $ 20,511. TOTAL REVENUES, FISCAL 2025 = $ 19,572. TOTAL REVENUES, % CHANGE = 5 %.",
+        "Sales to Wholesale Customers, FISCAL 2024 = $ 27,758. Sales to Wholesale Customers, % CHANGE = -7 %. Sales to Wholesale Customers, % CHANGE EXCLUDING CURRENCY CHANGES (1) = -6 %. Sales through NIKE Direct, FISCAL 2026 = 17,720. Sales through NIKE Direct, FISCAL 2025 = 18,783. Sales through NIKE Direct, % CHANGE = -6 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES (1) = -8 %. Sales through NIKE Direct, FISCAL 2024 = 21,519. Sales through NIKE Direct, % CHANGE = -13 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES (1) = -12 %. Global Brand Divisions (2), FISCAL 2026 = 49. Global Brand Divisions (2), FISCAL 2025 = 48.",
+        "3,930. Sales to Wholesale Customers, % CHANGE = -6 %. Sales to Wholesale Customers, % CHANGE EXCLUDING CURRENCY CHANGES = -3 %. Sales through NIKE Direct, FISCAL 2026 = 2,464. Sales through NIKE Direct, FISCAL 2025 = 2,573. Sales through NIKE Direct, % CHANGE = -4 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES = -6 %. Sales through NIKE Direct, FISCAL 2024 = 2,799. Sales through NIKE Direct, % CHANGE = -8 %. Sales through NIKE Direct, % CHANGE EXCLUDING CURRENCY CHANGES = -3 %. TOTAL REVENUES, FISCAL 2026 = $ 6,243. TOTAL REVENUES, FISCAL 2025 = $ 6,251. TOTAL REVENUES, % CHANGE = 0 %. TOTAL REVENUES, % CHANGE EXCLUDING CURRENCY CHANGES = -1 %."
+      ],
+      "response": "NIKE Direct revenues fell in fiscal 2026 mainly because two key sales channels slipped:\n\n| Component | 2026 Revenue | 2025 Revenue | % Change | Reason for decline |\n|-----------|--------------|--------------|----------|--------------------|\n| **NIKE Brand Digital sales** | $8.6 billion | $9.6 billion | –12 % | Reduced traffic to the digital platform, which lowered online sales. |\n| **NIKE store sales** | $9.1 billion | $9.2 billion | –4 % | Comparable store sales dropped 4 % (a decline in same‑store performance). |\n\nThese two drops caused the overall NIKE Direct revenue to decline 6 % on a reported basis (8 % on a currency‑neutral basis) in fiscal 2026 compared with fiscal 2025. The decline was driven by weaker digital traffic and a modest fall in same‑store sales.  \n\n**Source:** [S1] (Nike‑Inc‑2026‑10K.pdf, Page 36).",
+      "reference": "Down 6% reported (8% currency-neutral) due to declines in NIKE Brand Digital sales of 12% (from $9.6 billion to $8.6 billion, driven by reduced traffic) and NIKE store sales of 4% ($9.1 billion vs $9.2 billion)."
+    }
+  ],
+  "problems": [
+    {
+      "id": "q014",
+      "issue": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01jmvq4xegehxvk8dbxr6s5v47` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 6719, Requested 1301. Please try again in 150ms. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+    },
+    {
+      "id": "q016",
+      "issue": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01jmvq4xegehxvk8dbxr6s5v47` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 7128, Requested 1214. Please try again in 2.565s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+    },
+    {
+      "id": "q022",
+      "issue": "RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01jmvq4xegehxvk8dbxr6s5v47` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 6338, Requested 1798. Please try again in 1.02s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}"
+    }
+  ]
+}

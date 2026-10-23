@@ -1,0 +1,57 @@
+# --- Frontend UI & Web Servers ---
+streamlit
+fastapi
+uvicorn
+
+
+# --- CRITICAL ENVIRONMENT ALIGNMENT CAPS (PYTHON 3.12 & RAGAS SAFE) ---
+langchain-core>=0.3.0,<0.4.0        # Keeps LangChain 0.3 ecosystem unified
+langchain-community<0.4.0           # Required to prevent import breaks with modern Ragas modules
+huggingface-hub>=0.24.0,<1.0.0      # Keeps transformers & tokenizers stable
+datasets>=2.19.0,<4.0.0             # Broadened compatibility range for Python 3.12 dataset handling
+click>=8.0.0,<8.5.0
+
+
+# --- Model Providers & Hub Integration ---
+openai
+langchain-openai
+langchain-groq
+langchain-huggingface
+transformers
+tokenizers
+groq
+tiktoken
+
+
+# --- Advanced Document Ingestion & Parsers ---
+docling
+docling-core
+
+
+# --- Vector DBs, Hybrid Search, & Embeddings ---
+qdrant-client
+fastembed
+rank-bm25
+sentence-transformers
+torch
+torchvision
+redisvl
+
+
+# --- RAG Evaluation & Validation (Ragas & Utilities) ---
+ragas>=0.2.0                        # Compatible with modern single-turn schema validation and metrics
+pandas>=2.0.0                       # Required for exporting dataframe evaluation reports
+rapidfuzz                           # Required dependency for evaluation utilities and text similarity matching
+
+
+# --- Essential Utilities & Data Frameworks ---
+python-dotenv
+pydantic>=2.7.4,<3.0.0              # Upgraded range for Python 3.12 compatibility
+pydantic-settings
+
+
+# --- Observability ---
+flashrank 
+logfire 
+logfire[httpx]
+logfire[fastapi]
