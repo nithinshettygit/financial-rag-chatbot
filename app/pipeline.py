@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -20,7 +21,11 @@ from app.utils.router import QueryFilters, RoutePlan, SubQuery, build_filters, c
 from app.utils.tokens import count_tokens
 from app.utils.vector import QdrantVectorRetriever
 from app.utils.flashrank_reranker import FlashRankReranker
-from app.utils.cache import get_cached_rag_response, set_cached_rag_response
+from app.utils.cache import CacheScope, build_scope, cache_lookup, cache_store
+from app.utils.guard_rules import mask_pii
+from app.utils.intent_router import get_intent_router, warmup_intent_router
+from app.utils.pii import warmup_pii
+from app.utils.guardrails import REFUSAL_SCOPE, check_input, check_output, warmup_guardrails
 logger = logging.getLogger(__name__)
 from app.utils.cache import init_financial_cache
 
@@ -80,13 +85,19 @@ async def warmup_pipeline() -> None:
     def _warm_vector(): get_vector().retrieve("warmup query", 1, None)
     def _warm_bm25(): get_bm25().retrieve("warmup query", 1, None)
     def _warm_reranker(): _get_reranker().rerank("warmup query", [{"content": "warmup"}], 1)
-    def _warm_cache(): init_financial_cache() # Pre-loads HFTextVectorizer and connects to Redis index
+    def _warm_cache(): init_financial_cache()  # pre-loads HFTextVectorizer, connects to Redis, creates L2 index
+    def _warm_guard(): warmup_guardrails()      # builds NeMo LLMRails once (loads its small embedding model)
+    def _warm_pii(): warmup_pii()               # loads Presidio + spaCy model once
+    def _warm_intent(): warmup_intent_router()  # embeds the intent examples once
 
     await asyncio.gather(
         asyncio.to_thread(_warm_vector),
         asyncio.to_thread(_warm_bm25),
         asyncio.to_thread(_warm_reranker),
         asyncio.to_thread(_warm_cache),
+        asyncio.to_thread(_warm_guard),
+        asyncio.to_thread(_warm_pii),
+        asyncio.to_thread(_warm_intent),
         asyncio.to_thread(get_groq),
     )
     await get_catalog(force=True)
@@ -246,137 +257,268 @@ def build_context(
         selected.append(item)
     return sep.join(parts), source_map, selected
 
+
+
+# --------------------------------------------------------------------------- #
+# Request-path helpers
+# --------------------------------------------------------------------------- #
+_GREETING_RE = re.compile(
+    r"^\s*(?:hi+|hello+|hey+|hiya|yo|good\s+(?:morning|afternoon|evening)|how\s+are\s+you(?:\s+doing)?|"
+    r"what\s+can\s+you\s+do|who\s+are\s+you|thanks|thank\s+you)(?:\s+(?:there|bot|assistant))?\s*[!.?]*\s*$",
+    re.I,
+)
+_GREETING_SYSTEM = (
+    "You are a professional, friendly, and helpful Financial RAG Analytics Assistant. "
+    "Respond naturally and briefly to the user's greeting or casual message without requiring document context."
+)
+_CHAT_SYSTEM = (
+    "You are a Financial RAG Analytics Assistant that answers questions about a set of indexed company filings. "
+    "Reply briefly and naturally to greetings, thanks, and questions about what you can do, and mention that you can "
+    "answer questions about the filings (financial metrics, history, risks, comparisons). You cannot perform actions "
+    "(payments, transfers, purchases, bookings), access accounts, or help with unrelated tasks. If asked for any of "
+    "those, say so in one sentence and steer back to the filings. Never invent financial data."
+)
+_bg_tasks: set = set()
+
+
+async def _guard_free_text(query: str, answer: str, events: list) -> str:
+    """Output rails for replies that are NOT grounded in retrieved context (small talk, summaries)."""
+    g = await check_output(query, answer, "")
+    if not g.allowed:
+        events.append(f"output_blocked:{g.rail}")
+        return g.message or REFUSAL_SCOPE
+    return g.text
+
+
+def _fire_and_forget(fn: Callable, *args) -> None:
+    """Run a blocking function in a thread without blocking the response; keep a reference so it isn't GC'd."""
+    task = asyncio.create_task(asyncio.to_thread(fn, *args))
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+def corpus_version(catalog: List[Dict[str, Any]]) -> str:
+    """Changes whenever documents are added/removed/re-indexed -> stale cache entries become unreachable."""
+    sig = "|".join(sorted(f"{d.get('document_id')}:{d.get('chunk_count', '')}" for d in catalog))
+    return hashlib.sha1(sig.encode()).hexdigest()[:8]
+
+
+def _sanitize_history(history: List[Any]) -> List[Any]:
+    """Mask PII in prior turns before they reach any LLM."""
+    out = []
+    for t in history:
+        try:
+            out.append(t.model_copy(update={"content": mask_pii(t.content or "")}))
+        except AttributeError:  # pydantic v1
+            out.append(t.copy(update={"content": mask_pii(t.content or "")}))
+    return out
+
+
+def _last_assistant(history: List[Any]) -> str:
+    for t in reversed(history or []):
+        if t.role == "assistant":
+            return t.content or ""
+    return ""
+
+
+async def _llm(messages: List[Dict[str, str]], temperature: float):
+    resp = await asyncio.to_thread(
+        lambda: chat_with_retry(get_groq(), model=settings.LLM_MODEL, messages=messages, temperature=temperature)
+    )
+    return resp.choices[0].message.content.strip(), resp
+
+
+def _reply(request: ChatRequest, answer: str, intent: str, search_query: str, state: SessionState,
+           chunks: Optional[list] = None, source_map: Optional[dict] = None) -> ChatResponse:
+    return ChatResponse(
+        session_id=request.session_id, answer=answer, intent=intent, search_query=search_query,
+        state=state, retrieved_chunks=chunks or [], source_map=source_map or {},
+    )
+
+
+def _system_prompt(context: str, followup_type: str, strict: bool = False) -> str:
+    rules = [
+        "1. Tabular & Multi-Year Facts: When data is given as 'Document: Metric | Column = Value | ...', extract the exact figures for each requested year.",
+        "2. Multi-Year Comparisons: If the user asks for changes, growth rates, or comparisons over time, calculate and state the difference clearly based on the provided numbers.",
+        "3. Units & Scale: State monetary units accurately (e.g. in millions, thousands, or percentages as specified in the context).",
+        "4. Citations: Cite your sources using passage tags like [S1], [S2] where applicable.",
+        "5. Grounding: Rely strictly on the context. If figures for a requested year or metric are not present, explicitly state that they are unavailable.",
+    ]
+    if followup_type == "elaboration":
+        rules.append(
+            "6. Elaboration: The user wants MORE detail on your previous answer. Provide only NEW information from the "
+            "context (breakdowns, drivers, comparisons, commentary). Do not restate figures you already gave. "
+            "If the context holds nothing new, say so plainly."
+        )
+    if strict:
+        rules.append(
+            "7. STRICT: every figure you state must be copied verbatim from the context (or be a simple calculation "
+            "from context figures that you show). Never estimate or recall numbers from memory."
+        )
+    return (
+        "You are a precise, professional financial QA assistant. Answer the user query accurately and comprehensively "
+        "using ONLY the context provided below.\n\nGuidelines:\n" + "\n".join(rules) + f"\n\nCONTEXT:\n{context}"
+    )
+
+
+async def _generate_answer(system_prompt: str, user_content: str, history: List[Any], followup_type: str):
+    messages = [{"role": "system", "content": system_prompt}]
+    if followup_type == "elaboration":  # only elaboration depends on the previous answer
+        for t in history[-4:]:
+            messages.append({"role": t.role, "content": (t.content or "")[:1500]})
+    messages.append({"role": "user", "content": user_content})
+    return await _llm(messages, 0.0)
+
+
+async def _answer_greeting(request: ChatRequest, query: str, root_span) -> ChatResponse:
+    """Greetings/small talk: no router, no guardrail LLM, no history. Served from the L1 exact cache."""
+    state = request.state or SessionState()
+    scope = CacheScope(intent="general_chat")
+    hit = await asyncio.to_thread(cache_lookup, query, scope, False)
+    if hit:
+        root_span.set_attribute("cache_hit", True)
+        return _reply(request, hit["answer"], "general_chat", query, state)
+    root_span.set_attribute("cache_hit", False)
+    answer, _ = await _llm(
+        [{"role": "system", "content": _CHAT_SYSTEM}, {"role": "user", "content": query}], 0.7
+    )
+    _fire_and_forget(
+        cache_store, query, scope,
+        {"answer": answer, "retrieved_chunks": [], "intent": "general_chat", "search_query": query, "document_ids": []},
+        False, settings.CACHE_GREETING_TTL,
+    )
+    return _reply(request, answer, "general_chat", query, state)
+
+
+# --------------------------------------------------------------------------- #
+# Main entry point
+# --------------------------------------------------------------------------- #
 async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
     t0 = time.perf_counter()
-    
-    with logfire.span("Execute RAG Pipeline", query=request.query, session_id=request.session_id) as root_span:
-        
-        # --- 1. Catalog & Query Planning (Done ONCE) ---
+
+    with logfire.span("Execute RAG Pipeline", session_id=request.session_id) as root_span:
+        raw_query = request.query.strip()
+        state0 = request.state or SessionState()
+        events: list = []   # guardrail activity, attached to the root span
+
+        def _mark():
+            root_span.set_attribute("guardrail_events", list(events))
+
+        # --- 0. Embedding intent router: cheap, data-driven fast paths (falls through when not confident) ---
+        semantic_label, semantic_ok = None, False
+        intent_router = get_intent_router()
+        if intent_router is not None:
+            try:
+                decision = await asyncio.to_thread(intent_router.decide, raw_query)
+                semantic_label, semantic_ok = decision.label, True
+                root_span.set_attribute("intent_top", decision.top)
+                root_span.set_attribute("intent_score", round(decision.score, 3))
+                root_span.set_attribute("intent_fast_path", decision.label or "")
+            except Exception:
+                logfire.exception("Intent router failed; using LLM router only")
+
+        fast_path_ok = semantic_label in ("smalltalk", "out_of_scope")
+        if fast_path_ok:  # never take a fast path with PII in the text: let the full guardrail path handle it
+            fast_path_ok = (await asyncio.to_thread(mask_pii, raw_query)) == raw_query
+        if not semantic_ok and _GREETING_RE.match(raw_query):  # degraded mode: anchored greeting regex
+            semantic_label, fast_path_ok = "smalltalk", True
+
+        if fast_path_ok and semantic_label == "smalltalk":
+            root_span.set_attribute("path", "smalltalk")
+            root_span.set_attribute("query", raw_query)
+            return await _answer_greeting(request, raw_query, root_span)
+        if fast_path_ok and semantic_label == "out_of_scope":
+            events.append("out_of_scope_fast")
+            root_span.set_attribute("path", "out_of_scope")
+            root_span.set_attribute("query", raw_query)
+            _mark()
+            return _reply(request, REFUSAL_SCOPE, "general_chat", raw_query, state0)
+
+        # --- 1. Input rails (NeMo): PII masking, injection heuristics, LLM policy check ---
+        with logfire.span("Input Guardrails") as g_span:
+            guard_in = await check_input(raw_query)
+            g_span.set_attribute("allowed", guard_in.allowed)
+            g_span.set_attribute("rail", guard_in.rail or "")
+            g_span.set_attribute("degraded", guard_in.degraded)
+        if guard_in.degraded:
+            events.append("guardrails_degraded")
+        if not guard_in.allowed:
+            safe_query = await asyncio.to_thread(mask_pii, raw_query)   # never log / echo raw PII
+            events.append(f"input_blocked:{guard_in.rail}")
+            root_span.set_attribute("query", safe_query)
+            root_span.set_attribute("blocked_by", guard_in.rail or "")
+            _mark()
+            return _reply(request, guard_in.message or REFUSAL_SCOPE, "general_chat", safe_query, state0)
+        query = guard_in.text                      # PII-masked from here on
+        root_span.set_attribute("query", query)
+        if query != raw_query:
+            events.append("input_pii_masked")
+        _mark()
+        history = _sanitize_history(request.history or [])
+
+        # --- 2. Catalog & query planning (follow-up resolution happens here) ---
         catalog = await get_catalog()
         known_companies = sorted({d["company"] for d in catalog if d.get("company")})
-
         with logfire.span("Query Planning & Intent Routing") as plan_span:
-            plan = await plan_query(request.query, request.history or [], request.state or SessionState(), known_companies)
+            plan = await plan_query(query, history, state0, known_companies,
+                                    semantic=semantic_label, semantic_available=semantic_ok)
             plan_span.set_attribute("intent", plan.intent)
+            plan_span.set_attribute("followup_type", plan.followup_type)
             plan_span.set_attribute("entities", plan.entities)
             plan_span.set_attribute("search_query", plan.search_query)
 
-# --- 2. Check Semantic Cache Using Cleaned Search Query & Manifest Metadata ---
-        cache_key_query = plan.search_query if plan.search_query else request.query
-        target_entity = plan.entities[0] if plan.entities else None
-        target_year = plan.years[0] if plan.years else None
-        
-        cached_result = await asyncio.to_thread(
-            get_cached_rag_response, 
-            cache_key_query, 
-            entity=target_entity, 
-            year=target_year, 
-            intent=plan.intent
-        )
-        if cached_result:
-            total_duration = round(time.perf_counter() - t0, 2)
+        # --- 3-0. Out of scope (allow-list): anything that isn't filings Q&A, small talk, or a summary ---
+        if plan.intent == "out_of_scope":
+            events.append("out_of_scope")
+            _mark()
+            return _reply(request, REFUSAL_SCOPE, "general_chat", plan.search_query, state0)
+
+        # --- 3a. General chat (greetings / capability questions only): never cached ---
+        if plan.intent == "general_chat":
+            messages = [{"role": "system", "content": _CHAT_SYSTEM}]
+            messages += [{"role": t.role, "content": t.content} for t in history[-6:]]
+            messages.append({"role": "user", "content": query})
+            answer, _ = await _llm(messages, 0.7)
+            answer = await _guard_free_text(query, answer, events)
+            _mark()
+            return _reply(request, answer, plan.intent, plan.search_query, plan.state)
+
+        # --- 3b. Chat summary: depends on the whole conversation, never cached ---
+        if plan.intent == "chat_summary":
+            if not history:
+                answer = "We haven't discussed anything in this session yet! Feel free to ask any question about your financial documents."
+            else:
+                history_text = "\n".join(f"{t.role}: {t.content}" for t in history)
+                answer, _ = await _llm([{"role": "user", "content": (
+                    "You are the assistant participating directly in this conversation. Speak naturally to the user in a "
+                    "warm, conversational, and direct tone (using \"you\" and \"we\"). Summarize the key questions the user "
+                    "asked and the main points we discussed so far. Do NOT sound like an external observer.\n\n"
+                    f"Conversation History:\n{history_text}\n\nNatural Conversation Summary:")}], 0.2)
+                answer = await _guard_free_text(query, answer, events)
+            _mark()
+            return _reply(request, answer, plan.intent, plan.search_query, plan.state)
+
+        # --- 4. Cache lookup (RAG only) ---
+        # Cached answers must be a pure function of (standalone question, scope, corpus):
+        #   none       -> key on the user's own wording; L1 + L2
+        #   reference  -> key on the resolved standalone rewrite; L1 + L2
+        #   elaboration-> depends on the previous answer: key on (wording + hash of previous answer); L1 only
+        follow = plan.followup_type
+        ctx = hashlib.sha1(_last_assistant(history).encode()).hexdigest()[:12] if follow == "elaboration" else ""
+        scope = build_scope(plan.intent, plan.entities, plan.years, corpus_version(catalog), ctx)
+        semantic = follow != "elaboration"
+        cache_text = plan.search_query if follow == "reference" else query
+
+        cached = await asyncio.to_thread(cache_lookup, cache_text, scope, semantic)
+        if cached:
             root_span.set_attribute("cache_hit", True)
-            root_span.set_attribute("total_duration_s", total_duration)
-            
-            cached_chunks = [ContextChunk(**c) if isinstance(c, dict) else c for c in cached_result["retrieved_chunks"]]
-            
-            return ChatResponse(
-                session_id=request.session_id,
-                answer=cached_result["answer"],
-                intent=cached_result["intent"],
-                search_query=cached_result["search_query"],
-                state=request.state or SessionState(),
-                retrieved_chunks=cached_chunks,
-                source_map={}
-            )
-        
+            root_span.set_attribute("cache_tier", cached.get("_tier", ""))
+            cached_chunks = [ContextChunk(**c) if isinstance(c, dict) else c for c in cached.get("retrieved_chunks", [])]
+            return _reply(request, cached["answer"], cached.get("intent", plan.intent),
+                          cached.get("search_query", plan.search_query), plan.state, cached_chunks)
         root_span.set_attribute("cache_hit", False)
 
-        # --- 3. Handle General Chat Intent ---
-        if plan.intent == "general_chat":
-            with logfire.span("General Chat Generation", model=settings.LLM_MODEL):
-                messages = [
-                    {
-                        "role": "system",
-                        "content": "You are a professional, friendly, and helpful Financial RAG Analytics Assistant. Respond naturally and politely to the user's greeting, well-being inquiry, or casual message without requiring document context."
-                    }
-                ]
-                if request.history:
-                    for turn in request.history[-6:]:
-                        messages.append({"role": turn.role, "content": turn.content})
-                messages.append({"role": "user", "content": request.query})
-
-                response = await asyncio.to_thread(
-                    lambda: chat_with_retry(
-                        get_groq(),
-                        model=settings.LLM_MODEL,
-                        messages=messages,
-                        temperature=0.7,
-                    )
-                )
-                answer = response.choices[0].message.content.strip()
-                total_duration = round(time.perf_counter() - t0, 2)
-                root_span.set_attribute("total_duration_s", total_duration)
-                
-                if not request.history:
-                    asyncio.create_task(asyncio.to_thread(
-                        set_cached_rag_response,
-                        cache_key_query,
-                        answer,
-                        [],
-                        plan.intent,
-                        plan.search_query
-                    ))
-                
-                return ChatResponse(
-                    session_id=request.session_id, answer=answer, intent=plan.intent,
-                    search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
-                )
-
-        # --- 4. Handle Chat Summary Intent ---
-        if plan.intent == "chat_summary":
-            with logfire.span("Generate Chat Summary", history_turns=len(request.history or [])):
-                if not request.history:
-                    answer = "We haven't discussed anything in this session yet! Feel free to ask any question about your financial documents."
-                else:
-                    history_text = "\n".join(f"{t.role}: {t.content}" for t in request.history)
-                    summary_prompt = f"""You are the assistant participating directly in this conversation. Speak naturally to the user in a warm, conversational, and direct tone (using "you" and "we"). 
-
-                    Summarize the key questions the user asked and the main points we discussed so far. Do NOT sound like an external observer, bot report, or third-person logger.
-
-                    Conversation History:
-                    {history_text}
-
-                    Natural Conversation Summary:"""
-                    summary_response = await asyncio.to_thread(
-                        lambda: chat_with_retry(
-                            get_groq(),
-                            model=settings.LLM_MODEL,
-                            messages=[{"role": "user", "content": summary_prompt}],
-                            temperature=0.2,
-                        )
-                    )
-                    answer = summary_response.choices[0].message.content.strip()
-
-                total_duration = round(time.perf_counter() - t0, 2)
-                root_span.set_attribute("total_duration_s", total_duration)
-
-                if not request.history:
-                    asyncio.create_task(asyncio.to_thread(
-                        set_cached_rag_response,
-                        cache_key_query,
-                        answer,
-                        [],
-                        plan.intent,
-                        plan.search_query
-                    ))
-
-                return ChatResponse(
-                    session_id=request.session_id, answer=answer, intent=plan.intent,
-                    search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
-                )
-
-        # --- 5. Handle Standard RAG Search Intent ---
+        # --- 5. Retrieval ---
         entity_filters = {}
         missing = []
         for entity in plan.entities or [None]:
@@ -387,86 +529,79 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             entity_filters[entity] = build_filters(plan.years, entity if (entity and not doc_ids) else None, doc_ids)
 
         if not entity_filters:
-            requested_entities = ", ".join(missing) or "the requested company"
-            answer = (
-                f"I couldn't find financial documents for {requested_entities}. "
-                "Check the company name and then try again."
-            )
-            total_duration = round(time.perf_counter() - t0, 2)
-            root_span.set_attribute("total_duration_s", total_duration)
-            return ChatResponse(
-                session_id=request.session_id,
-                answer=answer,
-                intent=plan.intent,
-                search_query=plan.search_query,
-                state=plan.state,
-                retrieved_chunks=[],
-            )
+            requested = ", ".join(missing) or "the requested company"
+            return _reply(request, f"I couldn't find financial documents for {requested}. Check the company name and then try again.",
+                          plan.intent, plan.search_query, plan.state)
 
         sub_queries = [sq for sq in plan.sub_queries if sq.entity in entity_filters]
         if not sub_queries:
             sub_queries = [SubQuery(text=plan.search_query, entity=next(iter(entity_filters)))]
 
-        # --- Developer Observability: Track Search & Source Manifests ---
         with logfire.span("Hybrid Search (Dense + BM25)", sub_queries_count=len(sub_queries)) as search_span:
             candidates = await hybrid_search_balanced(sub_queries, entity_filters, RERANK_CANDIDATES)
             search_span.set_attribute("candidates_count", len(candidates))
             search_span.set_attribute("candidate_source_files", list({c.get("source_file") for c in candidates if c.get("source_file")}))
 
         with logfire.span("FlashRank Reranking", candidates_in=len(candidates)) as rerank_span:
-            final_k = min(MAX_FINAL_TOP_K, max(FINAL_TOP_K, 2 * len(sub_queries)))
-            reranker = _get_reranker()
-            reranked = await asyncio.to_thread(reranker.rerank, plan.search_query, candidates, final_k)
+            base_k = FINAL_TOP_K + (3 if follow == "elaboration" else 0)  # elaboration needs a wider context
+            n_ent = max(len(entity_filters), 1)
+            # multi-company questions: at least 3 chunks per company, even if that exceeds the usual cap
+            final_k = min(max(MAX_FINAL_TOP_K, 3 * n_ent), max(base_k, 3 * n_ent, 2 * len(sub_queries)))
+            entity_queries = {
+                e: " ".join(p for p in (e, *plan.metrics, *(str(y) for y in plan.years)) if p)
+                for e in entity_filters if e
+            }
+            reranked = await asyncio.to_thread(
+                _get_reranker().rerank_balanced, candidates, final_k, plan.search_query, entity_queries)
             rerank_span.set_attribute("final_chunks_selected", len(reranked))
 
         context, source_map, final_chunks = build_context(reranked)
-
         if not context.strip():
-            return ChatResponse(
-                session_id=request.session_id, 
-                answer="I couldn't find support for your question in the available financial documents.", 
-                intent=plan.intent, search_query=plan.search_query, state=plan.state, retrieved_chunks=[]
-            )
+            return _reply(request, "I couldn't find support for your question in the available financial documents.",
+                          plan.intent, plan.search_query, plan.state)
 
-        system_prompt = (
-            "You are a precise, professional financial QA assistant. Answer the user query accurately and comprehensively using ONLY the context provided below.\n\n"
-            "Guidelines:\n"
-            "1. Tabular & Multi-Year Facts: When data is given as 'Document: Metric | Column = Value | ...', extract the exact figures for each requested year.\n"
-            "2. Multi-Year Comparisons: If the user asks for changes, growth rates, or comparisons over time, calculate and state the difference clearly based on the provided numbers.\n"
-            "3. Units & Scale: State monetary units accurately (e.g. in millions, thousands, or percentages as specified in the context).\n"
-            "4. Citations: Cite your sources using passage tags like [S1], [S2] where applicable.\n"
-            "5. Grounding: Rely strictly on the context. If figures for a requested year or metric are not present, explicitly state that they are unavailable.\n\n"
-            f"CONTEXT:\n{context}"
-        )
+        # --- 6. Generation + output rails (one strict retry if figures are not grounded) ---
+        user_content = query if query.strip() == plan.search_query.strip() else f"{query}\n(Retrieval focus: {plan.search_query})"
 
-        user_content = request.query if request.query.strip() == plan.search_query.strip() else f"{request.query}\n(Retrieval focus: {plan.search_query})"
+        answer, guard_out = "", None
+        for attempt in (1, 2):
+            with logfire.span("LLM Generation (Groq)", model=settings.LLM_MODEL, attempt=attempt) as llm_span:
+                llm_span.set_attribute("retrieved.document_ids", [c.get("document_id") for c in final_chunks])
+                llm_span.set_attribute("retrieved.chunk_ids", [c.get("chunk_id") for c in final_chunks])
+                answer, response = await _generate_answer(
+                    _system_prompt(context, follow, strict=attempt == 2), user_content, history, follow)
+                if getattr(response, "usage", None):
+                    llm_span.set_attribute("total_tokens", response.usage.total_tokens)
 
-        # --- Developer Observability: Attach Retrieved Chunk Manifests to LLM Span ---
-        with logfire.span("LLM Generation (Groq)", model=settings.LLM_MODEL) as llm_span:
-            llm_span.set_attribute("retrieved.document_ids", [c.get("document_id") for c in final_chunks])
-            llm_span.set_attribute("retrieved.source_files", [c.get("source_file") for c in final_chunks])
-            llm_span.set_attribute("retrieved.chunk_ids", [c.get("chunk_id") for c in final_chunks])
-            llm_span.set_attribute("retrieved.pages", [c.get("page_number") for c in final_chunks])
-            llm_span.set_attribute("retrieved.chunk_types", [c.get("chunk_type") for c in final_chunks])
+            with logfire.span("Output Guardrails", attempt=attempt) as o_span:
+                guard_out = await check_output(query, answer, context)
+                o_span.set_attribute("allowed", guard_out.allowed)
+                o_span.set_attribute("rail", guard_out.rail or "")
 
-            response = await asyncio.to_thread(
-                lambda: chat_with_retry(
-                    get_groq(),
-                    model=settings.LLM_MODEL,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_content},
-                    ],
-                    temperature=0.0,
-                )
-            )
-            answer = response.choices[0].message.content.strip()
-            if hasattr(response, "usage") and response.usage:
-                llm_span.set_attribute("total_tokens", response.usage.total_tokens)
+            if guard_out.allowed or "numeric" not in (guard_out.rail or ""):
+                break  # passed, or blocked for a reason a retry won't fix
 
-        total_duration = round(time.perf_counter() - t0, 2)
-        root_span.set_attribute("total_duration_s", total_duration)
+        if not guard_out.allowed:
+            events.append(f"output_blocked:{guard_out.rail}")
+            _mark()
+            root_span.set_attribute("blocked_by", guard_out.rail or "")
+            return _reply(request, guard_out.message or "I couldn't produce a verified answer.",
+                          plan.intent, plan.search_query, plan.state)   # not cached
+        if guard_out.text != answer:
+            events.append("output_pii_masked")
+        answer = guard_out.text
 
+        # Completeness: every requested company must be represented in the evidence we answered from.
+        covered = {c.get("entity") for c in final_chunks}
+        complete = not missing and set(entity_filters) <= covered
+        if missing:
+            answer = f"Note: I couldn't find documents for {', '.join(missing)}.\n\n{answer}"
+        if not complete:
+            logfire.warn("Incomplete evidence: entities={e} covered={c}", e=list(entity_filters), c=list(covered))
+
+        # --- 7. Build response + store ---
+        _mark()
+        root_span.set_attribute("total_duration_s", round(time.perf_counter() - t0, 2))
         context_chunks = [
             ContextChunk(
                 chunk_id=r["chunk_id"], content=r["content"], document_id=r["document_id"],
@@ -476,30 +611,13 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             )
             for r in final_chunks
         ]
-        
-        response_payload = ChatResponse(
-            session_id=request.session_id, answer=answer, intent=plan.intent,
-            search_query=plan.search_query, state=plan.state,
-            retrieved_chunks=context_chunks, source_map=source_map,
-        )
-
-# --- Extract manifest identifiers from retrieved chunks ---
         document_ids = list({c.get("document_id") for c in final_chunks if c.get("document_id")})
-        final_entity = plan.entities[0] if plan.entities else (document_ids[0] if document_ids else None)
-        final_year = plan.years[0] if plan.years else None
 
-        # --- 6. Store successful standard RAG results with manifest metadata ---
-        asyncio.create_task(asyncio.to_thread(
-            set_cached_rag_response,
-            query=cache_key_query,
-            answer=answer,
-            retrieved_chunks=context_chunks,
-            intent=plan.intent,
-            search_query=plan.search_query,
-            entity=final_entity,
-            year=final_year,
-            document_ids=document_ids
-        ))
-
-        return response_payload
-    
+        if complete:  # never cache an answer that is missing a requested company
+            _fire_and_forget(
+                cache_store, cache_text, scope,
+                {"answer": answer, "retrieved_chunks": context_chunks, "intent": plan.intent,
+                 "search_query": plan.search_query, "document_ids": document_ids},
+                semantic,
+            )
+        return _reply(request, answer, plan.intent, plan.search_query, plan.state, context_chunks, source_map)

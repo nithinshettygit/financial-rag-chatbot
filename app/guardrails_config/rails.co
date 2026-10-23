@@ -1,0 +1,87 @@
+# =============================================================================
+# rails.co  -  Colang 1.0 flows for the Financial RAG service
+#
+# Flow names below must match the entries in config.yml:
+#   input  : mask pii input -> check input heuristics -> self check input (built-in)
+#   output : check prompt leak -> mask pii output -> check numeric grounding
+#
+# Custom actions live in actions.py. Built-in `self check input` reuses the
+# bot message `refuse to respond` defined here.
+# =============================================================================
+
+
+# ----------------------------- bot messages ----------------------------------
+# Generic refusal. Also used by the built-in `self check input` rail.
+define bot refuse to respond
+  "I can only help with questions about the indexed financial filings, such as revenue, margins, expenses, risk factors, and year-over-year changes. I can't perform actions like payments or transfers, or help with unrelated requests."
+
+define bot refuse injection
+  "I can't change my instructions or share them. Ask me about the indexed financial filings and I'll gladly help."
+
+define bot refuse too long
+  "That message is too long for me to process. Please shorten it to a specific question about the filings."
+
+define bot refuse empty
+  "I didn't catch a question there. What would you like to know about the indexed financial filings?"
+
+define bot refuse unverified figures
+  "I couldn't verify the figures in my draft answer against the source documents, so I won't present them. Please rephrase, or ask for a specific metric and fiscal year."
+
+define bot refuse prompt leak
+  "I can't share details about my internal instructions. Is there something in the financial filings I can help with?"
+
+
+# ------------------------------- input rails ---------------------------------
+# 1) Mask PII (Presidio: phones, emails, cards, IDs ... configurable in settings) and API keys
+#    BEFORE anything else sees the text, including the router LLM and the logs.
+define subflow mask pii input
+  $user_message = execute mask_pii(text=$user_message, direction="input")
+
+# 2) Deterministic heuristics: empty / oversized input and prompt-injection phrases.
+define subflow check input heuristics
+  $verdict = execute check_input_heuristics(text=$user_message)
+
+  if $verdict == "empty"
+    bot refuse empty
+    stop
+
+  if $verdict == "too_long"
+    bot refuse too long
+    stop
+
+  if $verdict == "injection"
+    bot refuse injection
+    stop
+
+  if $verdict != "ok"
+    bot refuse to respond
+    stop
+
+
+# ------------------------------- output rails --------------------------------
+# 1) Never echo our system prompt / retrieval scaffolding.
+define subflow check prompt leak
+  $safe = execute check_prompt_leak
+
+  if not $safe
+    bot refuse prompt leak
+    stop
+
+# 2) Mask PII / secrets that may have been present in retrieved context.
+define subflow mask pii output
+  $bot_message = execute mask_pii(text=$bot_message, direction="output")
+
+# 3) Financial hallucination guard: most material figures in the answer must be
+#    traceable to $relevant_chunks (passed in by the pipeline as a context message).
+define subflow check numeric grounding
+  $grounded = execute check_numeric_grounding
+
+  if not $grounded
+    bot refuse unverified figures
+    stop
+
+
+# --------------------------- optional: fact checking -------------------------
+# Enable by adding `self check facts` to rails.output.flows in config.yml and
+# defining a `self_check_facts` prompt in prompts.yml. It costs one extra LLM
+# call per answer, and needs no flow definition here (NeMo ships it built in).
