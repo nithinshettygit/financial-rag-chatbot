@@ -1,6 +1,6 @@
 # app/utils/flashrank_reranker.py
 from __future__ import annotations
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from flashrank import Ranker, RerankRequest
 from app.config import settings
 import logfire
@@ -22,6 +22,11 @@ class FlashRankReranker:
             chunk_type = item.get("chunk_type", "text")
             
             text_parts = []
+            company = item.get("entity") or item.get("company") or metadata.get("company")
+            if company:
+                text_parts.append(f"Company: {company}")
+            if item.get("source_file"):
+                text_parts.append(f"Source: {item['source_file']}")
             if headings:
                 text_parts.append(f"Section: {headings}")
 
@@ -56,7 +61,7 @@ class FlashRankReranker:
 
             reranked_output = []
             for res in results[:top_k]:
-                original_item = res["meta"]
+                original_item = dict(res["meta"])  # copy: never mutate shared candidate dicts
                 score = float(res["score"])
                 original_item["final_score"] = score
                 original_item["rerank_score"] = score
@@ -68,3 +73,41 @@ class FlashRankReranker:
             for c in candidates[:top_k]:
                 c.setdefault("final_score", c.get("rrf_score", c.get("score", 0.0)))
             return candidates[:top_k]
+
+    def rerank_balanced(
+        self,
+        candidates: List[Dict[str, Any]],
+        top_k: int,
+        default_query: str,
+        entity_queries: Optional[Dict[Optional[str], str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Rerank each entity's candidates separately, then interleave round-robin.
+
+        A single global top-k lets one company's chunks crowd out the other's in comparisons.
+        Round-robin guarantees every entity gets its best chunks first, and because build_context
+        drops from the tail when over budget, no entity is the first to be cut.
+        With 0-1 entities this is identical to rerank().
+        """
+        if not candidates or top_k <= 0:
+            return []
+
+        groups: Dict[Optional[str], List[Dict[str, Any]]] = {}
+        for c in candidates:
+            groups.setdefault(c.get("entity"), []).append(c)
+        if len(groups) <= 1:
+            return self.rerank(default_query, candidates, top_k)
+
+        entity_queries = entity_queries or {}
+        ranked = {
+            ent: self.rerank(entity_queries.get(ent) or default_query, items, len(items))
+            for ent, items in groups.items()
+        }
+
+        out: List[Dict[str, Any]] = []
+        depth = 0
+        while len(out) < top_k and any(depth < len(r) for r in ranked.values()):
+            for r in ranked.values():
+                if depth < len(r) and len(out) < top_k:
+                    out.append(r[depth])
+            depth += 1
+        return out
