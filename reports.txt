@@ -1,130 +1,32 @@
-Here is an in-depth, step-by-step technical breakdown of the code logic and workflow in `parse_pdf.py`.
+## Behavior you'll see
 
----
+| Scenario | Before | After |
+|---|---|---|
+| "Nike 2026 revenue", then "tell me more about it" | Identical cached answer | A new answer with different details (segments, drivers, year-over-year change), written to avoid repeating the first one |
+| "revenue details of Nike", then "revenue sources of Nike" | Same cached answer | Two separate answers, because the word-overlap check rejects the near match |
+| "Nike 2026 revenue", then "what about 2025?" | Could reuse the 2026 answer | Rewritten as "Nike revenue 2025" and answered fresh or from the matching cache entry |
+| "hi" repeated | Often missed, especially after other questions | First call uses the LLM, every repeat comes from the cache with no LLM call at all |
+| Repeat the same elaboration after the same previous answer | Same answer | Same answer from the cache, which is correct, because it's keyed on that previous answer |
 
-### **1. Global Constants & Regular Expression Patterns**
+## Performance and cost
 
-The script sets strict boundaries upfront to ensure safe ingestion and embedding token limits:
+- **Latency:** every non-greeting question now waits for NeMo's LLM policy check (`self check input`) before the router runs. Expect roughly +0.2–0.5 s per request on a small Groq model. Output rails are deterministic, so they add almost nothing.
+- **LLM calls:** one extra call per non-greeting query. The exception is the rare numeric-grounding retry, which adds one more generation.
+- **Cache hits:** these still pay for the input check and the router call, because the cache scope depends on the router's entity and year output. They skip retrieval, reranking and generation, so they're still much faster than a miss.
+- **Elaboration:** these questions retrieve 3 extra chunks and send the last few turns to the model, so they use more tokens than a normal question.
+- **Hit rate:** it will go down. The semantic match is stricter, so paraphrases like "revenue breakdown" and "revenue details" now miss more often. That is the cost of fixing the wrong-answer hits. You can loosen `CACHE_MAX_DISTANCE` and `CACHE_MIN_TERM_OVERLAP` after watching the logs.
 
-* **`EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"`**: Defines the target vector embedding model.
+## New ways it can go wrong
 
+- **Numeric-grounding blocks:** an answer is blocked when more than half its material figures can't be found in the retrieved text. A calculated growth rate is usually fine, but an answer made mostly of derived numbers can be refused. The pipeline retries once with a stricter prompt before giving up.
+- **Over-blocking on input:** the injection regex and the LLM policy check can reject odd but legitimate phrasing. If that happens, check the `blocked_by` attribute in Logfire and adjust `rails.co` or `prompts.yml`.
+- **Follow-up misclassification:** a standalone question can occasionally be treated as a follow-up, or the reverse. The regex overrides catch the common cases but not all of them.
+- **NeMo failure:** if NeMo errors or times out, the deterministic rules run instead and the LLM policy check is skipped. `degraded` is logged on the Input Guardrails span.
 
-* **`MAX_EMBEDDING_TOKENS = 500`**: Enforces a strict token limit to remain safely under the model's absolute 512-token ceiling.
+## What to watch first
 
+- `cache_hit` and `cache_tier` on the root span in Logfire.
+- The `Cache L2 near-miss` and `rejected by lexical guard` log lines.
+- `blocked_by` and `followup_type` in your first day of real traffic.
 
-* **`MIN_TEXT_CHARS = 35` & `MIN_TEXT_WORDS = 6**`: Lower-bound filters designed to discard micro-chunk noise, page numbers, or stray artifacts.
-
-
-* **Regex Patterns (`_CELL_SPLIT`, `_YEAR_RE`, `_SEPARATOR_ROW`)**: Used to parse serialized key-value strings, locate fiscal years (e.g., `2023`), and identify Markdown table separator rows.
-
-
-
----
-
-### **2. Data Structure (`DocumentChunk`)**
-
-* Implemented using Python's `@dataclass` decorator.
-
-
-* Acts as the standardized data contract for every piece of content extracted from the document. It holds attributes such as `chunk_id`, `document_id`, `content`, `embedding_text`, `chunk_type` (`text`, `table`, or `table_fact`), `page_number`, hierarchical `headings`, `table_caption`, `source_file`, and a free-form `metadata` dictionary.
-
-
-
----
-
-### **3. Table Parsing Helpers**
-
-Financial and structured data require customized parsing logic to prevent data loss:
-
-* **`clean_year(col_str)`**: Uses `_YEAR_RE` to search a column string and extract a standardized integer year.
-
-
-* **`parse_cell_left(left)`**: Separates a financial metric name (e.g., "Net Revenue") from its accompanying column header/metadata within serialized key-value strings using pattern matching.
-
-
-* **`extract_structured_table(text)`**: Handles two distinct table layouts:
-1. *Markdown Pipe Tables*: Splits lines starting with `|`, ignores markdown separator lines (`_SEPARATOR_ROW`), extracts column orders from the header row, and maps rows by their metrics.
-
-
-2. *Serialized Key-Value Strings*: Splits cells using `_CELL_SPLIT`, isolates assignments containing `=`, parses left-hand sides via `parse_cell_left`, and aggregates them into a structured nested dictionary (`rows_by_metric`).
-
-
-
-
-* **`split_large_table_content(text, max_words_per_block)`**: Prevents large tables from bloating past the token ceiling by cutting long cells into bounded row blocks of roughly 120 words each.
-
-
-
----
-
-### **4. Fact Generation Logic (`build_multiyear_fact_chunks`)**
-
-* To optimize retrieval for specific financial questions (e.g., "What was the revenue in 2022?"), this function creates **atomic multi-year row facts**.
-
-
-* For each individual metric row, it isolates non-empty values across columns, extracts all referenced fiscal years, builds a consolidated sentence (e.g., `doc_id: Revenue | 2021 = $100 | 2022 = $120.`), and generates a dedicated `table_fact` chunk with enriched metadata containing values by column.
-
-
-
----
-
-### **5. Core Processing Class (`FastDoclingChunker`)**
-
-This class coordinates the document transformation lifecycle:
-
-* **Initialization (`__init__`)**:
-* Loads the Hugging Face tokenizer linked to `EMBEDDING_MODEL` with built-in truncation and max length constraints.
-
-
-* Configures `PdfPipelineOptions` to execute locally using 4 threads on the CPU while disabling heavy OCR (`do_ocr = False`) for performance.
-
-
-* Instantiates `HybridChunker` (with options to repeat table headers and merge peers) and `DocumentConverter`.
-
-
-
-
-* **Truncation (`_truncate`)**: Encodes and decodes text using the Hugging Face tokenizer to strictly cut off any text exceeding `MAX_EMBEDDING_TOKENS`.
-
-
-* **PDF Processing Workflow (`process_pdf`)**:
-1. *Conversion*: Converts the source PDF via Docling into an internal document representation (`doc`).
-
-
-2. *Raw Chunks & Markdown*: Iterates through raw chunks generated by `HybridChunker`, falling back to `export_to_markdown()` when available.
-
-
-3. *Filtering & Classification*: Inspects document item labels and content characters. Non-table chunks failing minimum length parameters (`MIN_TEXT_CHARS`, `MIN_TEXT_WORDS`) or matching SEC header/IRS boilerplate patterns are filtered out. Table chunks are flagged if they contain pipe characters, assignment operators, or explicit table labels.
-
-
-4. *Page Mapping*: Extracts page numbers from the provenance attributes (`prov`) of underlying document items.
-
-
-5. *Branching Execution*:
-* **If Table**: Extracts structured rows/columns, splits large table blocks, generates block chunks, and calls `build_multiyear_fact_chunks` to create discrete financial fact chunks.
-
-
-* **If Text**: Hashes the text content into a unique SHA-256 chunk identifier, builds a contextual header block for embedding text, and creates a standard text chunk.
-
-
-
-
-6. Returns the complete list of generated `DocumentChunk` objects alongside the full Markdown export of the document.
-
-
-
-
-
----
-
-### **6. Pipeline Orchestration (`run_pipeline` & Main Block)**
-
-* **`run_pipeline`**: Sets up output directories, initializes `FastDoclingChunker`, triggers PDF processing, writes out the full document text as a Markdown file (`<doc_id>_document.md`), and serializes all chunk dictionaries into a JSON manifest file (`<doc_id>_manifest.json`).
-
-
-* **CLI Entrypoint (`if __name__ == "__main__":`)**: Uses Python's `argparse` module to accept command-line arguments (`--pdf`, `--doc-id`, `--out-dir`), executes the entire data pipeline, and prints success diagnostics.
-
-===================================================================================================================================================
-
-
-
+I haven't run this against live Redis, NeMo or Groq, so treat the first few days as tuning time.

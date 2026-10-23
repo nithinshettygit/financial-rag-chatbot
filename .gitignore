@@ -1,6 +1,59 @@
+# ==========================================
+# 1. Project-Specific Files & Data (Your Rules)
+# ==========================================
 .env
-
-
 __pycache__/
 unused/
-data/
+# data/
+.vscode/
+
+# ==========================================
+# 2. Python Core & Virtual Environments
+# ==========================================
+# Excludes compiled Python bytecode across any nested directories
+*.py[cod]
+*$py.class
+
+# Excludes local virtual environments (keeps your dependencies local)
+.venv/
+vnev/
+venv312/
+env/
+ENV/
+
+# ==========================================
+# 3. Operating System Clutter
+# ==========================================
+# macOS system files (folder view configurations)
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows system files
+Thumbs.db
+Ehthumbs.db
+Desktop.ini
+
+# ==========================================
+# 4. Code Editors & IDE Configurations
+# ==========================================
+# Visual Studio Code settings
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.code-workspace
+
+# JetBrains IDEs (PyCharm, IntelliJ, etc.)
+.idea/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# ==========================================
+# 5. Build, Distributions, and Logs
+# ==========================================
+build/
+dist/
+*.egg-info/
+*.log

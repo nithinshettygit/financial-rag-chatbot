@@ -4,7 +4,7 @@ docker start financial-redis
 
 uvicorn app.main:app --reload
 
-streamlit run app/app.py
+streamlit run app/app_ui.py
 
 
 docker exec -it financial-redis redis-cli FLUSHALL
