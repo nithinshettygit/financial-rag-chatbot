@@ -4,11 +4,16 @@ fastapi
 uvicorn
 
 
-# --- CRITICAL ENVIRONMENT ALIGNMENT CAPS (PYTHON 3.12 & RAGAS SAFE) ---
+# --- CRITICAL ENVIRONMENT ALIGNMENT CAPS (SOLVES PIP CONFLICTS) ---
+fsspec[http]<=2025.3.0             # Resolves datasets conflict
+typer<0.27.0                       # Resolves docling-core conflict
+huggingface-hub<2.0                # Resolves fastembed & docling-ibm-models conflict
+rich<15.0.0                        # Resolves instructor conflict
+packaging<26.0.0                   # Resolves langchain-core conflict
+
 langchain-core>=0.3.0,<0.4.0        # Keeps LangChain 0.3 ecosystem unified
 langchain-community<0.4.0           # Required to prevent import breaks with modern Ragas modules
-huggingface-hub>=0.24.0,<1.0.0      # Keeps transformers & tokenizers stable
-datasets>=2.19.0,<4.0.0             # Broadened compatibility range for Python 3.12 dataset handling
+datasets>=2.19.0,<3.0.0             # Stable datasets range matching fsspec caps
 click>=8.0.0,<8.5.0
 
 
@@ -17,7 +22,7 @@ openai
 langchain-openai
 langchain-groq
 langchain-huggingface
-transformers
+transformers<4.49.0
 tokenizers
 groq
 tiktoken
@@ -31,8 +36,8 @@ docling-core
 # --- Vector DBs, Hybrid Search, & Embeddings ---
 qdrant-client
 fastembed
-rank-bm25
-sentence-transformers
+rank-bm25 
+sentence-transformers               # <-- Included back here
 torch
 torchvision
 redisvl
@@ -48,6 +53,7 @@ rapidfuzz                           # Required dependency for evaluation utiliti
 python-dotenv
 pydantic>=2.7.4,<3.0.0              # Upgraded range for Python 3.12 compatibility
 pydantic-settings
+instructor
 
 
 # --- Observability ---

@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     with logfire.span("Server Startup & Warmup"):
         try:
             await warmup_pipeline()
-            await asyncio.to_thread(init_financial_cache)
+            # await asyncio.to_thread(init_financial_cache)
         except Exception:
             logger.exception("Warmup failed")
             raise

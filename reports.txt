@@ -30,3 +30,76 @@
 - `blocked_by` and `followup_type` in your first day of real traffic.
 
 I haven't run this against live Redis, NeMo or Groq, so treat the first few days as tuning time.
+
+## Request flow
+
+```
+User query
+   │
+   ├─ 0. Greeting? (regex) ──yes──► L1 cache ──hit──► reply
+   │                                   └─miss─► LLM once ► store L1 (7d) ► reply
+   │
+   ├─ 1. INPUT RAILS (NeMo)
+   │      mask PII → injection/length check → LLM policy check
+   │      blocked ──► refusal (never cached)
+   │
+   ├─ 2. PLAN (router LLM)
+   │      intent, entities, years, followup_type, standalone query
+   │      general_chat / chat_summary ──► LLM reply (never cached)
+   │
+   ├─ 3. CACHE LOOKUP (RAG only)
+   │      L1 exact ──► L2 semantic + lexical check ──hit──► reply
+   │
+   ├─ 4. RETRIEVE → rerank → build context
+   │
+   ├─ 5. GENERATE (history added only for elaboration)
+   │
+   ├─ 6. OUTPUT RAILS (NeMo)
+   │      prompt-leak → mask PII → numeric grounding
+   │      figures ungrounded ──► regenerate once, strict ──► re-check
+   │      still blocked ──► refusal (never cached)
+   │
+   └─ 7. STORE in cache (background) ──► reply
+```
+
+## Guardrails
+
+- **Input:**
+  - PII masking runs first, so the router never sees raw SSNs, card numbers or keys.
+  - Next come the empty, too-long and prompt-injection checks.
+  - The last step is the LLM policy check (`self check input`).
+- **Output:**
+  - A system-prompt leak check.
+  - PII masking.
+  - Numeric grounding, which compares the figures in the answer to the retrieved text.
+- **Failure mode:** if NeMo errors or times out, the deterministic rules still run and the LLM policy check is skipped.
+
+## Caching
+
+- **L1 (exact):** keyed on scope plus normalized text. Greetings and promoted L2 hits live here.
+- **L2 (semantic):** vector search filtered by entity, year, intent and corpus version, then verified. Cosine distance must be at most 0.04, numbers must match, and content-word overlap must be at least 0.7.
+- **What gets cached:**
+
+| Type | Cache key | Tiers |
+|---|---|---|
+| Standalone question | The user's own wording | L1 + L2 |
+| Reference follow-up ("what about 2025?") | The standalone rewrite | L1 + L2 |
+| Elaboration ("tell me more") | Wording plus a hash of the previous answer | L1 only |
+| Summaries, small talk, refusals | Not cached | None |
+
+- **Invalidation:** the corpus version changes when documents are re-indexed, so old entries stop matching. TTL is 24 hours for answers and 7 days for greetings.
+
+## Logs (Logfire)
+
+- **Spans:** Execute RAG Pipeline (root), Input Guardrails, Query Planning, Hybrid Search, FlashRank Reranking, LLM Generation (with `attempt`), Output Guardrails.
+- **Root span attributes:** `path`, `cache_hit`, `cache_tier`, `blocked_by`, `total_duration_s`.
+- **Per-span attributes:**
+  - Input Guardrails: `allowed`, `rail`, `degraded`.
+  - Planning: `intent`, `followup_type`, `entities`, `search_query`.
+  - LLM Generation: the retrieved document and chunk IDs, plus token usage.
+- **Cache log lines:**
+  - `Cache HIT (L1)` and `Cache HIT (L2)`.
+  - `Cache MISS`.
+  - `Cache L2 near-miss` and `rejected by lexical guard`, both with distances, for tuning thresholds.
+  - `Cache STORE`.
+- **Guardrail log lines:** `Input blocked by {rail}`, `Output blocked by {rail}`, and errors when NeMo fails.

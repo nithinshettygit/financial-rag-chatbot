@@ -1,0 +1,16 @@
+colang_version: "1.0"
+
+# The LLM used by the LLM-based rails is injected in code (app/utils/guardrails.py),
+# so no `models:` block is needed here.
+rails:
+  input:
+    flows:
+      - mask pii input            # deterministic, runs first (also protects the router LLM)
+      - check input heuristics    # deterministic prompt-injection / length checks
+      - self check input          # NeMo built-in, LLM policy check (prompt in prompts.yml)
+  output:
+    flows:
+      - check prompt leak         # deterministic
+      - mask pii output           # deterministic
+      - check numeric grounding   # deterministic: figures must exist in retrieved context
+      # - self check facts        # optional LLM fact-check (needs a self_check_facts prompt); +1 LLM call

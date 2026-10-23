@@ -23,3 +23,5 @@ logfire[fastapi]
 deepeval
 redis 
 redisvl
+
+

@@ -1,3 +1,4 @@
+# app/utils/router.py
 import asyncio
 import json
 import re
@@ -16,6 +17,25 @@ _YEAR_RE = re.compile(r"\b(201\d|202\d|203\d)\b")
 _SUFFIXES = {"inc", "incorporated", "corp", "corporation", "company", "co", "ltd", "limited", "plc"}
 MAX_SUB_QUERIES = 12
 
+FOLLOWUP_TYPES = {"none", "reference", "elaboration"}
+DEFAULT_ASPECTS = [
+    "breakdown by segment, product or region",
+    "key drivers and management commentary",
+    "year-over-year change",
+]
+
+# "tell me more", "elaborate", "why?", ... -> same topic, wants NEW detail
+_ELAB_RE = re.compile(
+    r"^\s*(?:and\s+|ok(?:ay)?,?\s+)?(?:please\s+)?(?:tell me more|more (?:details?|info\w*)|give me more|elaborate|"
+    r"expand(?:\s+on)?|go (?:on|deeper)|continue|explain (?:that|it|this|more|further)|what else|how so|why\??\s*$)",
+    re.I,
+)
+# pronouns / ellipsis -> needs reference resolution
+_REF_RE = re.compile(
+    r"\b(?:it|its|that|this|those|these|them|they|their|he|she)\b|^\s*(?:and|also|what about|how about|same for)\b",
+    re.I,
+)
+
 
 class QueryFilters(BaseModel):
     years: Optional[List[int]] = None
@@ -30,11 +50,13 @@ class SubQuery(BaseModel):
 
 class RoutePlan(BaseModel):
     intent: str
-    search_query: str
+    search_query: str                      # standalone question (fully self-contained)
     state: SessionState
     entities: List[str] = Field(default_factory=list)
     years: List[int] = Field(default_factory=list)
     sub_queries: List[SubQuery] = Field(default_factory=list)
+    metrics: List[str] = Field(default_factory=list)
+    followup_type: str = "none"            # none | reference | elaboration
 
 
 # --------------------------------------------------------------------------- #
@@ -45,6 +67,7 @@ def company_key(text: str) -> str:
     while terms and terms[-1] in _SUFFIXES:
         terms.pop()
     return " ".join(terms)
+
 
 def detect_known_entities(query: str, known_companies: List[str]) -> List[str]:
     """Deterministic entity detection against the indexed company list (LLM-independent)."""
@@ -99,16 +122,34 @@ def build_filters(
     return QueryFilters(years=years or None, company=company, document_ids=document_ids or None)
 
 
+def classify_followup(query: str, history: List[ChatTurn], llm_type: Optional[str]) -> str:
+    """LLM verdict + deterministic overrides. Never a follow-up without history."""
+    if not history:
+        return "none"
+    if _ELAB_RE.search(query):
+        return "elaboration"
+    if llm_type in FOLLOWUP_TYPES:
+        # LLMs under-detect short elliptical follow-ups; correct the obvious ones.
+        if llm_type == "none" and len(query.split()) <= 6 and _REF_RE.search(query):
+            return "reference"
+        return llm_type
+    return "reference" if (len(query.split()) <= 8 and _REF_RE.search(query)) else "none"
+
+
+def _last_user_question(history: List[ChatTurn]) -> str:
+    for t in reversed(history or []):
+        if t.role == "user":
+            return (t.content or "").strip()
+    return ""
+
+
 # --------------------------------------------------------------------------- #
 # LLM call (sync; executed in a worker thread)
 # --------------------------------------------------------------------------- #
-# app/utils/router.py (Snippet of the prompt instructions)
-# app/utils/router.py
-
 def _call_router_llm(query: str, history: List[ChatTurn], state: SessionState, known: List[str]) -> Dict[str, Any]:
     recent = history[-min(settings.MAX_HISTORY_TURNS, 4):] if history else []
     history_text = "\n".join(
-        f"{t.role}: {t.content if t.role == 'user' else t.content[:240]}" for t in recent
+        f"{t.role}: {t.content if t.role == 'user' else t.content[:600]}" for t in recent
     )
     prompt = f"""You are a query router for an enterprise multi-document financial RAG system.
 
@@ -121,19 +162,31 @@ Latest User Query: "{query}"
 
 Tasks:
 1. intent:
-   - "rag_search": For factual questions about financial data, metrics, documents, or company filings.
-   - "chat_summary": When the user asks to summarize, recap, or review our conversation (e.g. "summarize", "recap", "summary").
-   - "general_chat": For greetings, casual small talk, well-being inquiries ("how are you"), or capability questions.
-2. entities: ALL companies the latest query is about.
-3. metrics: distinct topics asked about (short noun phrases).
-4. fiscal_years: list of years explicitly requested.
-5. search_query: standalone rewrite for rag_search queries.
-6. state: company, fiscal_year, target_metric, document_id.
+   - "rag_search": factual questions about financial data, metrics, documents, or company filings.
+   - "chat_summary": the user asks to summarize/recap our conversation.
+   - "general_chat": greetings, small talk, well-being inquiries, capability questions.
+2. followup_type:
+   - "none": the query is fully self-contained.
+   - "reference": the query is a NEW question that omits the company/year/metric and relies on the conversation
+     (e.g. "what about 2025?", "and for Duolingo?", "what was its net income?").
+   - "elaboration": the user wants MORE DETAIL on the topic already answered
+     (e.g. "tell me more", "elaborate", "why?", "explain that").
+3. entities: ALL companies the latest query is about (resolve pronouns from the conversation/state).
+4. metrics: distinct topics asked about (short noun phrases). For "elaboration", the topic being elaborated.
+5. fiscal_years: list of years requested (resolve from conversation/state when omitted).
+6. search_query: a fully STANDALONE question that makes sense with no conversation.
+   - Keep EVERY distinguishing qualifier from the user's wording (e.g. "sources", "details", "breakdown", "growth").
+   - "reference": inline the resolved company, year and metric.
+   - "elaboration": restate the topic and ask for additional detail not already covered.
+7. aspects: ONLY for "elaboration": 2-4 distinct angles NOT yet covered in the previous assistant answer
+   (e.g. "breakdown by segment", "regional split", "key drivers", "year-over-year change"). Otherwise [].
+8. state: company, fiscal_year, target_metric, document_id.
 
 Return ONLY JSON:
 {{"intent": "rag_search"|"chat_summary"|"general_chat",
+  "followup_type": "none"|"reference"|"elaboration",
   "entities": [str], "metrics": [str], "fiscal_years": [int],
-  "search_query": str,
+  "search_query": str, "aspects": [str],
   "state": {{"company": str|null, "fiscal_year": str|null, "target_metric": str|null, "document_id": str|null}}}}"""
     try:
         resp = chat_with_retry(
@@ -148,7 +201,7 @@ Return ONLY JSON:
     except Exception as e:
         logger.error(f"Router LLM failed: {e}")
         return {}
-    
+
 
 async def plan_query(
     query: str,
@@ -157,15 +210,17 @@ async def plan_query(
     known_companies: Optional[List[str]] = None,
 ) -> RoutePlan:
     known = known_companies or []
-
+    history = history or []
 
     data = await asyncio.to_thread(_call_router_llm, query, history, state, known)
     intent = data.get("intent", "rag_search")
     if intent not in {"rag_search", "chat_summary", "general_chat", "document_inventory"}:
         intent = "rag_search"
 
+    followup_type = classify_followup(query, history, data.get("followup_type")) if intent == "rag_search" else "none"
+
     llm_state = data.get("state") or {}
-    search_query = (data.get("search_query") or "").strip() or query
+    search_query = (data.get("search_query") or "").strip()
 
     # ---- entities (LLM + deterministic detection) ----
     raw_entities = [str(e) for e in (data.get("entities") or []) if str(e).strip()]
@@ -210,25 +265,49 @@ async def plan_query(
     # Entities used for retrieval: explicit ones, else the (carried-over) state company.
     effective_entities = entities or ([company] if company else [])
 
-# ---- metric decomposition ----
+    # ---- metrics ----
     metrics = [str(m).strip() for m in (data.get("metrics") or []) if str(m).strip()]
     if not metrics:
-        metrics = _fallback_metrics(query, effective_entities)
+        if followup_type != "none" and state.target_metric:
+            metrics = [state.target_metric]
+        else:
+            metrics = _fallback_metrics(query, effective_entities)
 
+    # ---- standalone query: LLM rewrite + deterministic enforcement ----
+    if not search_query:
+        if followup_type == "elaboration":
+            search_query = f"{_last_user_question(history) or query} additional details"
+        elif followup_type == "reference":
+            search_query = " ".join(p for p in (state.company, query) if p)
+        else:
+            search_query = query
+    if followup_type != "none":
+        for e in effective_entities:
+            if company_key(e) not in company_key(search_query):
+                search_query = f"{e} {search_query}"
+        if years_list and not any(str(y) in search_query for y in years_list):
+            search_query = f"{search_query} {' '.join(str(y) for y in years_list)}"
+
+    # ---- sub-queries ----
     year_str = " ".join(str(y) for y in years_list)
-    
-    # Updated: Force entity and year inheritance across all sub-queries
-    sub_queries = []
-    for entity in effective_entities or [None]:
-        for metric in metrics:
-            text = " ".join(p for p in (entity, metric, year_str) if p)
-            sub_queries.append(SubQuery(text=text, entity=entity))
-    
+    sub_queries: List[SubQuery] = []
+    if followup_type == "elaboration":
+        # Retrieve DIFFERENT angles than the first answer used, otherwise we re-fetch the same chunks.
+        aspects = [str(a).strip() for a in (data.get("aspects") or []) if str(a).strip()] or DEFAULT_ASPECTS
+        topic = " ".join(metrics)
+        for entity in effective_entities or [None]:
+            for aspect in aspects[:4]:
+                text = " ".join(p for p in (entity, topic, aspect, year_str) if p)
+                sub_queries.append(SubQuery(text=text, entity=entity))
+    else:
+        for entity in effective_entities or [None]:
+            for metric in metrics:
+                text = " ".join(p for p in (entity, metric, year_str) if p)
+                sub_queries.append(SubQuery(text=text, entity=entity))
+
     if not sub_queries:
         sub_queries = [SubQuery(text=search_query, entity=effective_entities[0] if effective_entities else None)]
-        
     sub_queries = sub_queries[:MAX_SUB_QUERIES]
-
 
     return RoutePlan(
         intent=intent,
@@ -237,4 +316,6 @@ async def plan_query(
         entities=effective_entities,
         years=years_list,
         sub_queries=sub_queries,
+        metrics=metrics,
+        followup_type=followup_type,
     )
