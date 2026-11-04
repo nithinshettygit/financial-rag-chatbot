@@ -12,7 +12,7 @@ import json
 import re
 import uuid
 from pathlib import Path
-from typing import Union
+from typing import Any, Union
 from fastembed import TextEmbedding
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -29,6 +29,28 @@ def _generate_deterministic_uuid(doc_id: str, chunk_id: str) -> str:
     namespace = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
     return str(uuid.uuid5(namespace, f"{doc_id}:{chunk_id}"))
 
+
+def validate_manifest_chunks(chunks: Any) -> list[dict[str, Any]]:
+    if not isinstance(chunks, list):
+        raise ValueError("Manifest JSON must contain an array of chunk objects.")
+
+    for index, chunk in enumerate(chunks):
+        if not isinstance(chunk, dict):
+            raise ValueError(f"Manifest chunk {index} must be a JSON object.")
+
+        for field in ("content", "embedding_text", "document_id", "chunk_id"):
+            value = chunk.get(field)
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"Manifest chunk {index} field '{field}' must be a string.")
+        for field in ("document_id", "chunk_id"):
+            if field in chunk and not chunk[field]:
+                raise ValueError(f"Manifest chunk {index} field '{field}' must not be empty.")
+        if "metadata" in chunk and not isinstance(chunk["metadata"], dict):
+            raise ValueError(f"Manifest chunk {index} field 'metadata' must be an object.")
+
+    return chunks
+
+
 @logfire.instrument("seed_database_manifest", extract_args=True)  
 def seed_database(
     manifest_path: Union[str, Path],
@@ -41,22 +63,24 @@ def seed_database(
             raise FileNotFoundError(f"Manifest missing at {manifest_path}")
 
         with open(manifest_path, encoding="utf-8") as f:
-            chunks = json.load(f)
+            chunks = validate_manifest_chunks(json.load(f))
 
-        # parse_pdf.py also writes <doc>_quality.json / <doc>_docling.json (JSON objects).
-        # Only a list of chunk dicts is a manifest; never crash on the others.
-        if not isinstance(chunks, list):
-            logfire.warn("Skipping non-manifest JSON file", path=str(manifest_path))
-            return 0
-        chunks = [c for c in chunks if isinstance(c, dict)]
-
-        valid_chunks = [c for c in chunks if c.get("content") and str(c.get("content")).strip()]
+        valid_chunks = [
+            c for c in chunks
+            if isinstance(c.get("content"), str) and c["content"].strip()
+        ]
     if not valid_chunks:
         return 0
 
-    Path(storage_path).mkdir(parents=True, exist_ok=True)
+    qdrant_url = os.environ.get("QDRANT_URL")
+    qdrant_api_key = os.environ.get("QDRANT_API_KEY")
+    if not qdrant_url:
+        Path(storage_path).mkdir(parents=True, exist_ok=True)
     with logfire.span("connect_qdrant_client", storage_path=storage_path):
-        client = QdrantClient(path=storage_path)
+        if qdrant_url:
+            client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+        else:
+            client = QdrantClient(path=storage_path)
 
         if recreate_collection and client.collection_exists(COLLECTION_NAME):
             logfire.warn("Recreating existing collection", collection=COLLECTION_NAME)

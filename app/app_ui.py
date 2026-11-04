@@ -29,17 +29,17 @@ if "state" not in st.session_state:
     }
 
 # Sidebar Controls & Metadata Inspector
-with st.sidebar:
-    st.header("⚙️ Session Controls")
-    st.text_input("Session ID", value=st.session_state.session_id, disabled=True)
+# with st.sidebar:
+#     st.header("⚙️ Session Controls")
+#     st.text_input("Session ID", value=st.session_state.session_id, disabled=True)
     
-    if st.button("Clear Chat History", type="primary"):
-        st.session_state.messages = []
-        st.rerun()
+#     if st.button("Clear Chat History", type="primary"):
+#         st.session_state.messages = []
+#         st.rerun()
         
-    st.markdown("---")
-    st.subheader("🔍 Active State Inspector")
-    st.json(st.session_state.state)
+#     st.markdown("---")
+#     st.subheader("🔍 Active State Inspector")
+#     st.json(st.session_state.state)
 
 # Display Chat History
 for msg in st.session_state.messages:

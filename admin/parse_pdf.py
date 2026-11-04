@@ -870,11 +870,11 @@ def run_pipeline(
     (out_dir / f"{doc_id}_quality.json").write_text(
         json.dumps(chunker.last_report, indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    # try:  # lossless Docling doc: re-chunk later without re-parsing the PDF
-    #     chunker.last_doc.save_as_json(out_dir / f"{doc_id}_docling.json")
-    # except Exception as exc:
-    #     logfire.warn("docling_json_save_failed {err}", err=str(exc))
-    # return chunks, manifest_path
+    try:  # lossless Docling doc: re-chunk later without re-parsing the PDF
+        chunker.last_doc.save_as_json(out_dir / f"{doc_id}_docling.json")
+    except Exception as exc:
+        logfire.warn("docling_json_save_failed {err}", err=str(exc))
+    return chunks, manifest_path
 
 
 if __name__ == "__main__":
