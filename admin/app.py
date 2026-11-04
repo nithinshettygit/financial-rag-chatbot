@@ -46,7 +46,7 @@ if sys.platform == "win32":
             pass
 
 from parse_pdf import run_pipeline
-from seed_qdrant_old import seed_database
+from seed_qdrant import seed_database, validate_manifest_chunks
 
 # Dynamic base directory configuration (relative to project root)
 BASE_DIR = ADMIN_DIR.parent
@@ -74,12 +74,31 @@ st.title("Multi-Document Financial RAG Ingestion Pipeline")
 st.caption("Extract, structure, and index financial PDFs or pre-parsed manifests into Qdrant")
 
 st.sidebar.header("Pipeline Configuration")
-qdrant_path = st.sidebar.text_input("Qdrant Storage Path", value=QDRANT_STORAGE_PATH)
-recreate_collection = st.sidebar.checkbox(
+qdrant_path = st.sidebar.text_input(
+    "Qdrant Storage Path",
+    value=QDRANT_STORAGE_PATH,
+    help="Used for local Qdrant. QDRANT_URL in the environment takes precedence when configured.",
+)
+qdrant_url = os.environ.get("QDRANT_URL")
+if qdrant_url:
+    st.sidebar.caption("Using remote Qdrant configured by QDRANT_URL.")
+else:
+    st.sidebar.caption("Using local Qdrant storage.")
+
+recreate_collection_requested = st.sidebar.checkbox(
     "Recreate Collection on Indexing",
     value=False,
     help="If enabled, deletes the existing collection before re-indexing.",
 )
+confirm_recreate_collection = False
+if recreate_collection_requested:
+    st.sidebar.warning(
+        "Recreating the collection deletes every indexed document, not just the uploaded one."
+    )
+    confirm_recreate_collection = st.sidebar.checkbox(
+        "Confirm deletion of the entire Qdrant collection"
+    )
+recreate_collection = recreate_collection_requested and confirm_recreate_collection
 
 # Use Tabs to cleanly separate PDF parsing vs. Manifest direct seeding
 tab_pdf, tab_manifest = st.tabs(["📄 1. Upload & Parse PDF", "📂 2. Upload Existing Manifest"])
@@ -144,7 +163,9 @@ with tab_pdf:
             with col2:
                 if st.button("Index into Qdrant", key=f"seed_{upload_key}"):
                     manifest_info = st.session_state.get(manifest_state_key)
-                    if not manifest_info or manifest_info["doc_id"] != doc_id:
+                    if recreate_collection_requested and not confirm_recreate_collection:
+                        st.error("Confirm collection deletion in the sidebar before indexing.")
+                    elif not manifest_info or manifest_info["doc_id"] != doc_id:
                         st.error("Please parse this file first.")
                     elif not Path(manifest_info["path"]).exists():
                         st.error("Manifest file not found.")
@@ -185,16 +206,21 @@ with tab_manifest:
         manifest_bytes = manifest_file_upload.getvalue()
         
         # Parse JSON preview to validate format and extract default doc_id
+        manifest_error = None
         try:
-            manifest_chunks = json.loads(manifest_bytes.decode("utf-8"))
+            manifest_chunks = validate_manifest_chunks(
+                json.loads(manifest_bytes.decode("utf-8"))
+            )
             first_chunk = manifest_chunks[0] if manifest_chunks else {}
             suggested_doc_id = first_chunk.get("document_id", Path(manifest_file_upload.name).stem.replace("_manifest", ""))
-        except Exception as e:
+        except (UnicodeDecodeError, ValueError) as e:
             manifest_chunks = []
             suggested_doc_id = Path(manifest_file_upload.name).stem
-            st.error(f"Invalid JSON file format: {e}")
+            manifest_error = f"Invalid manifest file: {e}"
 
         st.markdown(f"### 📂 {manifest_file_upload.name}")
+        if manifest_error:
+            st.error(manifest_error)
         
         col_m_id, _ = st.columns([2, 1])
         with col_m_id:
@@ -203,6 +229,12 @@ with tab_manifest:
                 value=suggested_doc_id,
                 key="manifest_doc_id_input"
             )
+
+        normalized_manifest_doc_id = re.sub(
+            r"[^A-Za-z0-9_-]+", "_", manifest_doc_id
+        ).strip("_-")
+        if manifest_chunks and not normalized_manifest_doc_id:
+            st.error("Target Document Identifier must contain letters, numbers, '_' or '-'.")
 
         if manifest_chunks:
             table_fact_count = sum(1 for c in manifest_chunks if c.get("chunk_type") == "table_fact")
@@ -213,15 +245,29 @@ with tab_manifest:
                 f"({table_count} table blocks, {table_fact_count} multi-year table facts, {text_count} text blocks)."
             )
 
-            if st.button("Seed Qdrant from Uploaded Manifest", key="seed_from_manifest_btn"):
+            if st.button(
+                "Seed Qdrant from Uploaded Manifest",
+                key="seed_from_manifest_btn",
+                disabled=not normalized_manifest_doc_id,
+            ):
                 # Save uploaded manifest locally to manifests dir for persistence
-                saved_manifest_path = MANIFEST_DIR / manifest_file_upload.name
-                saved_manifest_path.write_bytes(manifest_bytes)
-                with logfire.span("ui_seed_from_uploaded_manifest", filename=manifest_file_upload.name):
-                    with st.spinner("Indexing pre-parsed chunks into Qdrant vector database..."):
-                        indexed_count = seed_database(
-                            manifest_path=saved_manifest_path,
-                            storage_path=qdrant_path,
-                            recreate_collection=recreate_collection,
-                        )
-                        st.success(f"Successfully indexed {indexed_count} vectors from `{manifest_file_upload.name}` into Qdrant!")
+                if recreate_collection_requested and not confirm_recreate_collection:
+                    st.error("Confirm collection deletion in the sidebar before indexing.")
+                else:
+                    chunks_to_seed = [
+                        {**chunk, "document_id": normalized_manifest_doc_id}
+                        for chunk in manifest_chunks
+                    ]
+                    saved_manifest_path = MANIFEST_DIR / Path(manifest_file_upload.name).name
+                    saved_manifest_path.write_text(
+                        json.dumps(chunks_to_seed, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                    with logfire.span("ui_seed_from_uploaded_manifest", filename=manifest_file_upload.name):
+                        with st.spinner("Indexing pre-parsed chunks into Qdrant vector database..."):
+                            indexed_count = seed_database(
+                                manifest_path=saved_manifest_path,
+                                storage_path=qdrant_path,
+                                recreate_collection=recreate_collection,
+                            )
+                            st.success(f"Successfully indexed {indexed_count} vectors from `{manifest_file_upload.name}` into Qdrant!")
