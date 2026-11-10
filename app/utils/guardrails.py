@@ -11,12 +11,16 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 import logfire
+import yaml
 
 from app.config import settings
 from app.utils import guard_rules as rules
+from app.utils.tokens import count_tokens
 
 _REFUSAL = "I can only help with questions about the indexed financial filings, and I can't help with that request."
 REFUSAL_SCOPE = (
@@ -40,6 +44,20 @@ class GuardResult:
     rail: Optional[str] = None      # name of the rail that blocked
     message: Optional[str] = None   # user-facing refusal
     degraded: bool = False          # True when NeMo failed and only deterministic rules ran
+    input_tokens: int = 0
+    output_tokens: int = 0
+    llm_calls: int = 0
+
+
+@lru_cache(maxsize=1)
+def _self_check_input_prompt() -> str:
+    prompt_path = Path(settings.GUARDRAILS_PATH) / "prompts.yml"
+    with prompt_path.open(encoding="utf-8") as prompt_file:
+        prompts = yaml.safe_load(prompt_file)
+    for prompt in prompts.get("prompts", []):
+        if prompt.get("task") == "self_check_input":
+            return str(prompt.get("content", ""))
+    raise ValueError(f"No self_check_input prompt found in {prompt_path}")
 
 
 def _build_rails():
@@ -93,21 +111,37 @@ async def check_input(text: str) -> GuardResult:
     from nemoguardrails.rails.llm.options import RailStatus, RailType
 
     try:
+        prompt = _self_check_input_prompt().replace("{{ user_input }}", text)
+        estimated_input = count_tokens(prompt)
+    except (OSError, ValueError, yaml.YAMLError) as e:
+        logfire.warn("Input guardrail token estimate unavailable: {err}", err=repr(e))
+        estimated_input = count_tokens(text)
+    try:
         res = await asyncio.wait_for(
             get_rails().check_async([{"role": "user", "content": text}], rail_types=[RailType.INPUT]),
             timeout=settings.GUARDRAILS_TIMEOUT_S,
         )
     except Exception as e:  # NeMo error, Groq outage, timeout...
         logfire.error("Input guardrails failed: {err}", err=repr(e))
-        return _fallback_input(text) if settings.GUARDRAILS_FAIL_OPEN else GuardResult(
+        fallback = _fallback_input(text) if settings.GUARDRAILS_FAIL_OPEN else GuardResult(
             False, text, rail="guardrail_error", message="I'm temporarily unable to process requests. Please try again.")
+        fallback.input_tokens = estimated_input
+        fallback.llm_calls = 1
+        return fallback
 
     if res.status == RailStatus.BLOCKED:
         logfire.warn("Input blocked by {rail}", rail=res.rail)
         # Prefer the bot message chosen by the Colang flow (rails.co); fall back to the default.
         msg = res.content if res.content and res.content != text else _REFUSAL
-        return GuardResult(False, text, rail=res.rail, message=msg)
-    return GuardResult(True, res.content if res.status == RailStatus.MODIFIED and res.content else text)
+        llm_called = "heuristic" not in (res.rail or "").lower()
+        return GuardResult(
+            False, text, rail=res.rail, message=msg, input_tokens=estimated_input if llm_called else 0,
+            output_tokens=count_tokens("Yes") if llm_called else 0, llm_calls=int(llm_called),
+        )
+    return GuardResult(
+        True, res.content if res.status == RailStatus.MODIFIED and res.content else text,
+        input_tokens=estimated_input, output_tokens=count_tokens("Yes"), llm_calls=1,
+    )
 
 
 async def check_output(query: str, answer: str, evidence: str) -> GuardResult:

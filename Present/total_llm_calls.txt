@@ -1,0 +1,50 @@
+1] Input policy check — NeMo’s self_check_input checks whether the prompt is in scope. It can be skipped if an earlier deterministic check blocks the prompt. See prompts.yml and config.yml.
+2] Query router — interprets the prompt, follow-up, and entities. See plan_query.
+3] Answer generation — answers from the retrieved filing excerpts. See pipeline.py.
+[opitional] Possible answer retry — one stricter generation attempt if numeric grounding fails. The output checks themselves are deterministic; they don’t call an LLM.
+
+
+
+token calcs[]
+
+[1- input guardrails, 2- query router , 3- llm generation, 4- output guardrails]
+
+user query: duolingo's revenue sources
+
+{ 10 items
+"code.filepath": "app\pipeline.py",
+"code.function": "_llm",
+"code.lineno": 334,
+"input_tokens": 874,
+"input_tokens_estimate": 808,
+"llm_calls": 1,
+"logfire.msg_template": "LLM Call (Groq)",
+"output_tokens": 322,
+"token_count_source": "provider",
+"total_tokens": 1196
+}
+
+
+======================
+folow-up on the same qun:
+go in depth
+
+
+{'input_tokens': 2104, 'input_tokens_estimate': 2022, 'llm_calls': 1, 'output_tokens': 828, 'token_count_source': 'provider', 'total_tokens': 2932}
+
+
+
+summarize:
+
+{6 items
+'input_tokens': 1181,
+'input_tokens_estimate': 1163,
+'llm_calls': 1,
+'output_tokens': 377,
+'token_count_source': 'provider',
+'total_tokens': 1558
+}
+
+
+
+

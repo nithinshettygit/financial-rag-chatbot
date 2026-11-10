@@ -18,7 +18,7 @@ from app.schemas import ChatRequest, ChatResponse, ContextChunk, SessionState
 from app.utils.bm25 import BM25Retriever
 from app.utils.llm import chat_with_retry, get_groq_clients
 from app.utils.router import QueryFilters, RoutePlan, SubQuery, build_filters, company_key, plan_query
-from app.utils.tokens import count_tokens
+from app.utils.tokens import count_message_tokens, count_tokens, log_token_usage
 from app.utils.vector import QdrantVectorRetriever
 from app.utils.flashrank_reranker import FlashRankReranker
 from app.utils.cache import CacheScope, build_scope, cache_lookup, cache_store
@@ -283,7 +283,15 @@ _bg_tasks: set = set()
 
 async def _guard_free_text(query: str, answer: str, events: list) -> str:
     """Output rails for replies that are NOT grounded in retrieved context (small talk, summaries)."""
-    g = await check_output(query, answer, "")
+    with logfire.span("Output Guardrails") as guard_span:
+        g = await check_output(query, answer, "")
+        guard_span.set_attribute("allowed", g.allowed)
+        guard_span.set_attribute("rail", g.rail or "")
+        guard_span.set_attribute("input_tokens", 0)
+        guard_span.set_attribute("output_tokens", 0)
+        guard_span.set_attribute("total_tokens", 0)
+        guard_span.set_attribute("llm_calls", 0)
+        guard_span.set_attribute("token_count_source", "deterministic")
     if not g.allowed:
         events.append(f"output_blocked:{g.rail}")
         return g.message or REFUSAL_SCOPE
@@ -322,10 +330,23 @@ def _last_assistant(history: List[Any]) -> str:
 
 
 async def _llm(messages: List[Dict[str, str]], temperature: float):
-    resp = await asyncio.to_thread(
-        lambda: chat_with_retry(get_groq(), model=settings.LLM_MODEL, messages=messages, temperature=temperature)
-    )
-    return resp.choices[0].message.content.strip(), resp
+    estimated_input = count_message_tokens(messages)
+    with logfire.span("LLM Call (Groq)") as llm_span:
+        llm_span.set_attribute("input_tokens_estimate", estimated_input)
+        try:
+            resp = await asyncio.to_thread(
+                lambda: chat_with_retry(get_groq(), model=settings.LLM_MODEL, messages=messages, temperature=temperature)
+            )
+        except Exception:
+            llm_span.set_attribute("input_tokens", estimated_input)
+            llm_span.set_attribute("output_tokens", 0)
+            llm_span.set_attribute("total_tokens", estimated_input)
+            llm_span.set_attribute("llm_calls", 1)
+            llm_span.set_attribute("token_count_source", "estimate")
+            raise
+        answer = resp.choices[0].message.content.strip()
+        log_token_usage(llm_span, resp, estimated_input, count_tokens(answer))
+        return answer, resp
 
 
 def _reply(request: ChatRequest, answer: str, intent: str, search_query: str, state: SessionState,
@@ -440,6 +461,11 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             g_span.set_attribute("allowed", guard_in.allowed)
             g_span.set_attribute("rail", guard_in.rail or "")
             g_span.set_attribute("degraded", guard_in.degraded)
+            g_span.set_attribute("input_tokens", guard_in.input_tokens)
+            g_span.set_attribute("output_tokens", guard_in.output_tokens)
+            g_span.set_attribute("total_tokens", guard_in.input_tokens + guard_in.output_tokens)
+            g_span.set_attribute("llm_calls", guard_in.llm_calls)
+            g_span.set_attribute("token_count_source", "estimate" if guard_in.llm_calls else "none")
         if guard_in.degraded:
             events.append("guardrails_degraded")
         if not guard_in.allowed:
@@ -577,6 +603,11 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
                 guard_out = await check_output(query, answer, context)
                 o_span.set_attribute("allowed", guard_out.allowed)
                 o_span.set_attribute("rail", guard_out.rail or "")
+                o_span.set_attribute("input_tokens", 0)
+                o_span.set_attribute("output_tokens", 0)
+                o_span.set_attribute("total_tokens", 0)
+                o_span.set_attribute("llm_calls", 0)
+                o_span.set_attribute("token_count_source", "deterministic")
 
             if guard_out.allowed or "numeric" not in (guard_out.rail or ""):
                 break  # passed, or blocked for a reason a retry won't fix
