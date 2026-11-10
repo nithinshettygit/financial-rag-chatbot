@@ -859,9 +859,9 @@ def run_pipeline(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     chunker = FastDoclingChunker(doc_title=doc_id, device=device, ocr_mode=ocr_mode)
-    chunks = chunker.process_pdf(pdf_path, doc_id)
+    chunks, markdown_text = chunker.process_pdf(pdf_path, doc_id)
 
-    # (out_dir / f"{doc_id}_document.md").write_text(markdown_text, encoding="utf-8")
+    (out_dir / f"{doc_id}_document.md").write_text(markdown_text, encoding="utf-8")
     manifest_path = out_dir / f"{doc_id}_manifest.json"
     manifest_path.write_text(
         json.dumps([asdict(c) for c in chunks], indent=2, ensure_ascii=False),
