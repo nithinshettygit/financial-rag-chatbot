@@ -189,7 +189,7 @@ def build_judge_llm():
         openai_api_base="https://api.groq.com/openai/v1",
         timeout=JUDGE_TIMEOUT,
         max_retries=0,
-        async_client=http_client,
+        http_async_client=http_client,
     )
     return LangchainLLMWrapper(chat_model)
 

@@ -4,12 +4,14 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+import logfire
 from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.schemas import ChatTurn, SessionState
 from app.utils.llm import chat_with_retry, get_groq_clients
 from app.utils.logger import logger
+from app.utils.tokens import count_tokens, log_token_usage
 
 client = get_groq_clients(timeout=20.0)  # on failure we fall back to heuristics
 
@@ -199,19 +201,33 @@ Return ONLY JSON:
   "entities": [str], "metrics": [str], "fiscal_years": [int],
   "search_query": str, "aspects": [str],
   "state": {{"company": str|null, "fiscal_year": str|null, "target_metric": str|null, "document_id": str|null}}}}"""
-    try:
-        resp = chat_with_retry(
-            client,
-            model=settings.LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content)
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        logger.error(f"Router LLM failed: {e}")
-        return {}
+    with logfire.span("Query Router LLM") as router_span:
+        estimated_input = count_tokens(prompt)
+        router_span.set_attribute("input_tokens_estimate", estimated_input)
+        try:
+            resp = chat_with_retry(
+                client,
+                model=settings.LLM_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:
+            router_span.set_attribute("input_tokens", estimated_input)
+            router_span.set_attribute("output_tokens", 0)
+            router_span.set_attribute("total_tokens", estimated_input)
+            router_span.set_attribute("llm_calls", 1)
+            router_span.set_attribute("token_count_source", "estimate")
+            logger.error(f"Router LLM failed: {e}")
+            return {}
+        response_text = resp.choices[0].message.content or ""
+        log_token_usage(router_span, resp, estimated_input, count_tokens(response_text))
+        try:
+            data = json.loads(response_text)
+            return data if isinstance(data, dict) else {}
+        except (TypeError, ValueError) as e:
+            logger.error(f"Router LLM returned invalid JSON: {e}")
+            return {}
 
 
 async def plan_query(
