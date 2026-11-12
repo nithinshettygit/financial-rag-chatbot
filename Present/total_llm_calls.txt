@@ -1,3 +1,8 @@
+admin-parsing[with gpu : depending upon page contnt complelxity taking ~ 5 to 10 sec/ page processing] 
+
+
+
+
 1] Input policy check — NeMo’s self_check_input checks whether the prompt is in scope. It can be skipped if an earlier deterministic check blocks the prompt. See prompts.yml and config.yml.
 2] Query router — interprets the prompt, follow-up, and entities. See plan_query.
 3] Answer generation — answers from the retrieved filing excerpts. See pipeline.py.
