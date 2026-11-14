@@ -1,0 +1,175 @@
+name: financial-rag
+
+services:
+  api:
+    build:
+      context: .
+      target: python-runtime
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "1"
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:?Set GROQ_API_KEY in .env.production}
+      CHAT_API_KEYS: ${CHAT_API_KEYS:?Set CHAT_API_KEYS in .env.production}
+      CHAT_RATE_LIMIT_REQUESTS: ${CHAT_RATE_LIMIT_REQUESTS:-20}
+      CHAT_RATE_LIMIT_WINDOW_SECONDS: ${CHAT_RATE_LIMIT_WINDOW_SECONDS:-60}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env.production}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
+    volumes:
+      - manifests:/app/data/manifests
+      - model_cache:/home/app/.cache
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - proxy
+      - backend
+    restart: unless-stopped
+    init: true
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  admin:
+    build:
+      context: .
+      target: python-runtime
+    command:
+      - streamlit
+      - run
+      - admin/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.baseUrlPath=admin
+      - --server.enableCORS=false
+      - --server.enableXsrfProtection=true
+      - --browser.gatherUsageStats=false
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env.production}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env.production}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env.production}
+      LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
+      STREAMLIT_SERVER_HEADLESS: "true"
+    volumes:
+      - manifests:/app/data/manifests
+      - admin_uploads:/app/data/temp_uploads
+      - model_cache:/home/app/.cache
+    depends_on:
+      qdrant:
+        condition: service_started
+    networks:
+      - proxy
+      - backend
+    restart: unless-stopped
+    init: true
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  redis:
+    image: redis/redis-stack-server:7.4.0-v2
+    command:
+      - sh
+      - -c
+      - exec redis-stack-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env.production}
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - backend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  nginx:
+    build:
+      context: .
+      target: production
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/certs:/etc/nginx/certs:ro
+      - ./deploy/secrets/admin.htpasswd:/etc/nginx/auth/admin.htpasswd:ro
+    depends_on:
+      api:
+        condition: service_started
+      admin:
+        condition: service_started
+    networks:
+      - proxy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+networks:
+  proxy:
+  backend:
+    internal: true
+
+volumes:
+  admin_uploads:
+  manifests:
+  model_cache:
+  qdrant_data:
+  redis_data:

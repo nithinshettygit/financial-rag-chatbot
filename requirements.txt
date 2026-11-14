@@ -9,6 +9,9 @@ tiktoken
 rank-bm25
 sentence-transformers
 streamlit
+docling
+transformers
+python-dotenv
 requests
 flashrank 
 logfire 
