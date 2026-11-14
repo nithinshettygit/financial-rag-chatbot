@@ -1,5 +1,7 @@
 # admin/app.py
+import hmac
 import os
+
 from dotenv import load_dotenv
 import logfire
 
@@ -13,7 +15,6 @@ logfire.configure(
 )
 logfire.instrument_pydantic()
 
-import asyncio
 import hashlib
 import json
 import re
@@ -25,25 +26,6 @@ import streamlit as st
 ADMIN_DIR = Path(__file__).resolve().parent
 if str(ADMIN_DIR) not in sys.path:
     sys.path.insert(0, str(ADMIN_DIR))
-
-# Silence Windows 10054 connection reset warnings on socket termination
-def silence_win_error_10054(loop, context):
-    exc = context.get("exception")
-    if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
-        return
-    loop.default_exception_handler(context)
-
-if sys.platform == "win32":
-    try:
-        loop = asyncio.get_running_loop()
-        loop.set_exception_handler(silence_win_error_10054)
-    except RuntimeError:
-        try:
-            loop = asyncio.get_event_loop()
-            if not loop.is_closed():
-                loop.set_exception_handler(silence_win_error_10054)
-        except Exception:
-            pass
 
 from parse_pdf import run_pipeline
 from seed_qdrant import seed_database, validate_manifest_chunks
@@ -69,6 +51,44 @@ st.set_page_config(
     layout="wide",
     page_icon="📊",
 )
+
+
+def require_admin_login() -> None:
+    admin_username = os.environ.get("ADMIN_USERNAME")
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    if not admin_username or not admin_password:
+        st.error("Admin access is disabled. Configure ADMIN_USERNAME and ADMIN_PASSWORD.")
+        st.stop()
+
+    if st.session_state.get("admin_authenticated"):
+        if st.sidebar.button("Log out", key="admin_logout"):
+            del st.session_state["admin_authenticated"]
+            st.rerun()
+        return
+
+    st.title("Admin sign in")
+    with st.form("admin_login"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Sign in")
+
+    if submitted:
+        username_matches = hmac.compare_digest(
+            username.encode("utf-8"),
+            admin_username.encode("utf-8"),
+        )
+        password_matches = hmac.compare_digest(
+            password.encode("utf-8"),
+            admin_password.encode("utf-8"),
+        )
+        if username_matches and password_matches:
+            st.session_state["admin_authenticated"] = True
+            st.rerun()
+        st.error("Invalid username or password.")
+    st.stop()
+
+
+require_admin_login()
 
 st.title("Multi-Document Financial RAG Ingestion Pipeline")
 st.caption("Extract, structure, and index financial PDFs or pre-parsed manifests into Qdrant")

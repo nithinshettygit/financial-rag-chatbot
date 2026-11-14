@@ -2,11 +2,12 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 import logfire
 from app.utils.cache import init_financial_cache
 from app.config import settings
 from app.schemas import ChatRequest, ChatResponse
+from app.security import enforce_chat_rate_limit, validate_security_settings
 from app.pipeline import run_rag_pipeline_async, shutdown_pipeline, warmup_pipeline
 from app.utils.logger import logger
 
@@ -22,6 +23,7 @@ REQUEST_TIMEOUT_S = float(os.getenv("REQUEST_TIMEOUT_S", "40"))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.ready = False
+    validate_security_settings()
     logger.info("Initializing server models...")
     with logfire.span("Server Startup & Warmup"):
         try:
@@ -57,7 +59,7 @@ async def readiness_check():
         raise HTTPException(status_code=503, detail="Server is warming up models")
     return {"status": "ready"}
 
-@app.post("/v1/chat", response_model=ChatResponse)
+@app.post("/v1/chat", response_model=ChatResponse, dependencies=[Depends(enforce_chat_rate_limit)])
 async def chat_endpoint(request: ChatRequest):
     if not getattr(app.state, "ready", False):
         raise HTTPException(status_code=503, detail="Server is warming up models")

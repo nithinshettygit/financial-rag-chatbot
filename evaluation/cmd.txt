@@ -1,2 +1,2 @@
- python -m evaluation.ragas4 
+ python -m evaluation.ragas
  --refresh

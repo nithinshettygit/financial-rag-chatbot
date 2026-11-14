@@ -4,8 +4,8 @@ docker start financial-redis
 
 uvicorn app.main:app --reload
 
-streamlit run app/app_ui.py
-
+cd web
+npm run dev
 
 docker exec -it financial-redis redis-cli FLUSHALL
 #for clearingf cache redis

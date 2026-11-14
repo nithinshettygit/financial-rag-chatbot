@@ -1,4 +1,5 @@
 # app/config.py
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -10,6 +11,11 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
     VECTOR_NAME: str = "fastembed-BAAI/bge-small-en-v1.5"
     COLLECTION_NAME: str = "financial_rag_analytics"
+
+    # Chat API authentication and shared per-key rate limiting
+    CHAT_API_KEYS: dict[str, str] = Field(default_factory=dict)
+    CHAT_RATE_LIMIT_REQUESTS: int = Field(default=20, gt=0)
+    CHAT_RATE_LIMIT_WINDOW_SECONDS: int = Field(default=60, gt=0)
 
     # FlashRank & Logfire
     RERANKER_MODEL: str = "ms-marco-MiniLM-L-12-v2"

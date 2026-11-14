@@ -2,6 +2,9 @@
 # 1. Project-Specific Files & Data (Your Rules)
 # ==========================================
 .env
+.env.production
+deploy/certs/
+deploy/secrets/
 __pycache__/
 unused/
 # data/
