@@ -1,0 +1,7 @@
+========== EVALUATION SUMMARY METRICS ==========
+context_precision    0.912500
+context_recall       1.000000
+faithfulness         0.869697
+answer_relevancy     0.973170
+dtype: float64
+=============================

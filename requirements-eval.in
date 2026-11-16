@@ -1,0 +1,8 @@
+-r requirements.txt
+
+datasets
+httpx
+pandas
+ragas
+langchain-openai
+langchain-huggingface
