@@ -7,11 +7,11 @@ services:
               --proxy-headers, --forwarded-allow-ips=*, --timeout-keep-alive, "30"]
     environment:
       GROQ_API_KEY: ${GROQ_API_KEY:?Set GROQ_API_KEY}
-      FALLBACK_GROQ_API_KEY: ${FALLBACK_GROQ_API_KEY:-}
+      FALLBAFCK_GROQ_API_KEY: ${FALLBACK_GROQ_API_KEY:-}
       CHAT_API_KEYS: ${CHAT_API_KEYS:?Set CHAT_API_KEYS}
       CHAT_RATE_LIMIT_REQUESTS: ${CHAT_RATE_LIMIT_REQUESTS:-60}
       CHAT_RATE_LIMIT_WINDOW_SECONDS: ${CHAT_RATE_LIMIT_WINDOW_SECONDS:-60}
-      QDRANT_STORAGE_PATH: /app/data/qdrant_storage
+      # QDRANT_STORAGE_PATH: /app/data/qdrant_storage
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
       REQUEST_TIMEOUT_S: "40"
@@ -19,7 +19,7 @@ services:
       OMP_NUM_THREADS: "4"
       HF_HUB_DISABLE_TELEMETRY: "1"
     volumes:
-      - ./data/qdrant_storage:/app/data/qdrant_storage
+      # - ./data/qdrant_storage:/app/data/qdrant_storage
       - ./data/manifests:/app/data/manifests
       - model_cache:/home/app/.cache
     depends_on:
