@@ -1,0 +1,65 @@
+
+
+docker start financial-redis
+
+uvicorn app.main:app --reload
+
+cd web
+npm run dev
+
+docker exec -it financial-redis redis-cli FLUSHALL
+#for clearingf cache redis
+
+
+#remove
+docker rm -f financial-redis
+docker run -d --name financial-redis -p 6379:6379 redis:latest
+
+
+
+
+===========================================================
+
+docker build --target production -t financial-rag-nginx-validation:latest .
+
+
+
+latest cmnds:
+
+Edited app/ code or requirements.in	
+
+docker compose --env-file .env.production up -d --build
+
+
+
+Edited .env.production	
+
+docker compose --env-file .env.production up -d --force-recreate api nginx
+
+
+Edited default.conf or the web UI	docker compose --env-file .env.production up -d --build nginx
+Added or changed manifests or Qdrant data	docker compose --env-file .env.production restart api (BM25 reads manifests only at startup)
+
+
+
+chage password admin:
+docker run --rm -it -v "${PWD}\deploy\secrets:/out" httpd:2.4-alpine htpasswd -B -c /out/admin.htpasswd admin
+
+
+
+
+#docker compose --env-file .env.production --profile server up -d --build
+#docker compose --env-file .env.production --profile server restart nginx
+
+
+docker compose --env-file .env.production restart nginx
+
+
+qdrant API Key
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6MDliOWQ1NGMtMzlhOC00OGRhLWIxMGMtMDhhZjYxYWQ0Yjg1In0.UV82sTRdS8WgM9L2ZFgpECkjopI7Z3-kZxeVtVT4B6Y
+
+and 
+Cluster Endpoint
+
+https://75479519-f332-4f84-9771-8d631a744089.sa-east-1-0.aws.cloud.qdrant.io

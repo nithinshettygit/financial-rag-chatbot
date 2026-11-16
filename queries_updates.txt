@@ -9,11 +9,13 @@ Expected income tax expense at federal statutory rate
 
 2. What were Duolingo's revenue, net income, and bookings in 2023?
 
-3. What percentage of Duolingo's 2023 revenue came from subscriptions?
+3. What percentage of Duolingo's 2024 revenue came from subscriptions?
 
 
 What are Duolingo's sources of revenue?
 
+
+# Duolingos revenue sources and nike revenue sources
 
 
 
@@ -23,3 +25,67 @@ table-extraction -> markdown[ai-ease]
 context -> [memory]folowup quns 
 
 vector db [change] [other than fais]
+
+
+
+
+
+rag evalation
+
+tracability 
+
+caching
+
+
+
+
+#updates:
+comparatie query failres
+distributed qus ans failed to fetch relaant source data
+
+
+tried with same 30 testdata for RAG evaluation, found issue with retreival results comparatie query failres and 
+distributed qus ans failed to fetch relaant source data
+then found key issue with chunking step , Table Structure Extraction: Added extract_table_structure() to parse multi-level column headers and indented row labels across balance sheet items.
+
+Prefixed document titles, section headers, page numbers, table columns, and row metrics onto each chunk's embedding string.
+
+afetr these updates got 80% better result 
+
+
+Exploring RAGAS for new  evaluation method
+
+
+13/10/2026
+ 
+inspecting vector search, BM25 retrieval, and FlashRank reranking modules.Diagnosed why complex multi-page queries for gross margins and segment revenues failed during test evaluations.Identified tokenization limitations in bm25.py that discarded essential financial symbols and percentages.   Recommended updating the BM25 tokenizer regex to properly preserve fiscal years, hyphens, and numeric values.   Proposed fixing query routing in router.py to ensure sub-queries correctly inherit company and year contexts.   Finalized a targeted optimization plan emphasizing lexical search and query decomposition without parser rewrites.
+
+
+-15 11:37:33,237 [INFO] ragas_eval: Ragas Results Summary:
+{'context_precision': 0.7900, 'context_recall': 0.9333, 'faithfulness': 0.9222, 'answer_relevancy': 0.9534}
+
+5 12:47:05,085 [INFO] ragas_eval: Ragas Results Summary:
+{'context_precision': 0.7977, 'context_recall': 0.9412, 'faithfulness': 0.9031, 'answer_relevancy': 0.9743}
+
+
+Identified key issues for ragas evaluation low scores: configured max token conflicts with embedding model max-token so this truncate the text during chunking process, 
+impemented robust pdf parsing and fixed token truncation issue, also handled multi year values from table 
+Got beter resulting ragas score: afetr updates=12 Q-A {'context_precision': 0.7900, 'context_recall': 0.9333, 'faithfulness': 0.9222, 'answer_relevancy': 0.9534}
+and 30 Q-A dataset {'context_precision': 0.7977, 'context_recall': 0.9412, 'faithfulness': 0.9031, 'answer_relevancy': 0.9743}
+
+
+Introduced logfire for parsing and seeding qdrant including streamlit updating
+
+
+
+:18<00:00,  7.10s/it]
+2026-10-16 13:04:20,651 [INFO] ragas_eval: Ragas Results Summary:
+• Context Precision: 0.874896
+• Context Recall: 0.944243
+• Faithfulness: 0.921522
+• Answer Relevancy: 0.982424
+
+
+
+redis chaching implmnt: 
+working , failed for semantically similar queries: year and company hallucination
