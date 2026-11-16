@@ -35,7 +35,11 @@ BASE_DIR = ADMIN_DIR.parent
 DATA_DIR = BASE_DIR / "data"
 MANIFEST_DIR = DATA_DIR / "manifests"
 TEMP_DIR = DATA_DIR / "temp_uploads"
-QDRANT_STORAGE_PATH = str(DATA_DIR / "qdrant_storage")
+# QDRANT_STORAGE_PATH = str(DATA_DIR / "qdrant_storage")
+# QDRANT_URL = os.environ["QDRANT_URL"]
+# QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
+
+
 
 MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)

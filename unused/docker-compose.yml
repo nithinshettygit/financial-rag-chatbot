@@ -8,7 +8,8 @@ services:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      - ./data/qdrant_storage:/qdrant/storage
+      # - ./data/qdrant_storage:/qdrant/storage
+      - ./data/manifests:/app/data/manifests
     restart: always
 
   api:

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     FALLBACK_GROQ_API_KEY: str | None = None
     LLM_MODEL: str = "openai/gpt-oss-20b"
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
-    VECTOR_NAME: str = "fastembed-BAAI/bge-small-en-v1.5"
+    VECTOR_NAME: str = "fastembed-BAAI-bge-small-en-v1.5"
     COLLECTION_NAME: str = "financial_rag_analytics"
 
     # Chat API authentication and shared per-key rate limiting
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     QDRANT_URL: str | None = None
     QDRANT_API_KEY: str | None = None
-    QDRANT_STORAGE_PATH: str = "data/qdrant_storage"
+    # QDRANT_STORAGE_PATH: str = "data/qdrant_storage"
     BM25_MANIFEST_PATH: str = "data/manifests"
 
     RETRIEVAL_K: int = 30
