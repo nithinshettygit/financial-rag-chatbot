@@ -14,3 +14,43 @@ docker exec -it financial-redis redis-cli FLUSHALL
 #remove
 docker rm -f financial-redis
 docker run -d --name financial-redis -p 6379:6379 redis:latest
+
+
+
+
+===========================================================
+
+docker build --target production -t financial-rag-nginx-validation:latest .
+
+
+
+latest cmnds:
+
+Edited app/ code or requirements.in	
+
+docker compose --env-file .env.production up -d --build
+
+
+
+Edited .env.production	
+
+docker compose --env-file .env.production up -d --force-recreate api nginx
+
+
+Edited default.conf or the web UI	docker compose --env-file .env.production up -d --build nginx
+Added or changed manifests or Qdrant data	docker compose --env-file .env.production restart api (BM25 reads manifests only at startup)
+
+
+
+chage password admin:
+docker run --rm -it -v "${PWD}\deploy\secrets:/out" httpd:2.4-alpine htpasswd -B -c /out/admin.htpasswd admin
+
+
+
+
+#docker compose --env-file .env.production --profile server up -d --build
+#docker compose --env-file .env.production --profile server restart nginx
+
+
+docker compose --env-file .env.production restart nginx
+

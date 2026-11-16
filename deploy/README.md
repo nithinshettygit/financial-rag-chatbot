@@ -6,8 +6,9 @@ This Compose deployment is a single-host production baseline:
   publishing host ports.
 - Nginx applies a coarse per-IP request/connection limit. FastAPI continues to
   authenticate `X-API-Key` and enforce a shared per-key Redis limit.
-- FastAPI and the Streamlit admin UI use a private backend network. Redis
-  Stack (for RedisVL search) and Qdrant are not published to the host.
+- FastAPI and the Streamlit admin UI use separate private backend networks.
+  Redis Stack (for RedisVL search) is API-only; Qdrant is shared by the API and
+  admin UI. Neither database is published to the host.
 - The admin UI is protected by Nginx Basic Auth and its separate app login.
 - Redis, Qdrant, manifests, uploaded admin files, and model downloads use
   persistent volumes.
@@ -18,6 +19,25 @@ Use a Linux host with Docker Engine and the Compose plugin, a DNS name pointing
 to that host, inbound TCP ports 80/443, and a TLS certificate for the DNS name.
 Use a managed secret store for production secrets where available; otherwise
 restrict `.env.production` to the deployment account and back it up securely.
+
+Regenerate dependency locks with Python 3.12 on Linux so platform markers match
+the runtime image. Run these from the repository root; the containers receive
+only dependency files, not the environment files:
+
+```sh
+docker run --rm \
+  -v "$PWD/requirements.in:/work/requirements.in:ro" \
+  -v "$PWD/requirements.txt:/work/requirements.txt" \
+  -w /work python:3.12-slim-bookworm sh -c \
+  'python -m pip install pip-tools && pip-compile --resolver=backtracking --strip-extras -o requirements.txt requirements.in'
+
+docker run --rm \
+  -v "$PWD/requirements-eval.in:/work/requirements-eval.in:ro" \
+  -v "$PWD/requirements.txt:/work/requirements.txt:ro" \
+  -v "$PWD/requirements-eval.txt:/work/requirements-eval.txt" \
+  -w /work python:3.12-slim-bookworm sh -c \
+  'python -m pip install pip-tools && pip-compile --resolver=backtracking --strip-extras -o requirements-eval.txt requirements-eval.in'
+```
 
 1. Copy `.env.production.example` to `.env.production`.
 2. Set `GROQ_API_KEY`, then generate distinct high-entropy values for
@@ -79,6 +99,20 @@ docker compose --env-file .env.production exec admin \
   python admin/seed_qdrant.py --all
 ```
 
+The named `manifests` volume is initialized from the image only the first time
+that volume is created. Rebuilding the image does not replace manifests already
+in the volume. After indexing or changing manifests, restart every API replica
+so its BM25 index reloads the files:
+
+```sh
+docker compose --env-file .env.production restart api
+```
+
+The API adds an `X-Request-ID` to each response and logs request method, path,
+status, and latency without the request body. Chat spans record only the query
+length and SHA-256 hash, not the query text. The chat proxy timeout is bounded
+at 55 seconds, above the API's 40-second request timeout.
+
 Keep the admin route on a private network or restrict it at the host
 firewall/VPN layer even though both login gates are enabled.
 
@@ -104,5 +138,12 @@ upgrades or destructive ingestion operations. Do not run `docker compose down
   and API 429/503 rates. Configure off-host encrypted backups and test restores.
 - Keep API workers at one unless the ML model memory profile and startup cost
   have been measured; Redis rate limits are shared across workers.
+- The API service has no published host port and can be scaled behind Nginx
+  after confirming host memory capacity:
+
+  ```sh
+  docker compose --env-file .env.production up -d --scale api=2
+  ```
+
 - This is a single-host setup, not high availability. Use managed Redis,
   Qdrant, secrets, TLS, and an external load balancer for multi-host operation.

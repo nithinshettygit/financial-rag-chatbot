@@ -1,0 +1,146 @@
+[
+  {
+    "id": "q001",
+    "user_input": "What were NIKE, Inc.'s total revenues in fiscal 2026?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "$46,398 million (about $46.4 billion).",
+    "question_type": "numerical",
+    "source_reference": "Consolidated Statements of Income",
+    "source_page": 58
+  },
+  {
+    "id": "q002",
+    "user_input": "What was NIKE's net income in fiscal 2026?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "$3,108 million.",
+    "question_type": "numerical",
+    "source_reference": "Consolidated Statements of Income",
+    "source_page": 58
+  },
+  {
+    "id": "q003",
+    "user_input": "What were NIKE's total assets as of May 31, 2026?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "$38,410 million.",
+    "question_type": "numerical",
+    "source_reference": "Consolidated Balance Sheets",
+    "source_page": 60
+  },
+  {
+    "id": "q004",
+    "user_input": "What was NIKE's gross margin in fiscal 2026?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "42.9%, an increase of 20 basis points from fiscal 2025.",
+    "question_type": "numerical",
+    "source_reference": "MD&A \u2013 Fiscal 2026 Financial Highlights",
+    "source_page": 32
+  },
+  {
+    "id": "q005",
+    "user_input": "How did NIKE's total revenues in fiscal 2026 compare with fiscal 2025?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "$46.4 billion vs $46.3 billion: flat on a reported basis and down 2% on a currency-neutral basis.",
+    "question_type": "comparison",
+    "source_reference": "MD&A \u2013 Fiscal 2026 Financial Highlights",
+    "source_page": 32
+  },
+  {
+    "id": "q006",
+    "user_input": "How did NIKE's net income change from fiscal 2025 to fiscal 2026?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "It decreased 3%, from $3,219 million to $3,108 million.",
+    "question_type": "comparison",
+    "source_reference": "MD&A \u2013 Results of Operations",
+    "source_page": 35
+  },
+  {
+    "id": "q007",
+    "user_input": "What were NIKE's revenues in fiscal 2024, 2025 and 2026?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "FY2024: $51,362 million; FY2025: $46,309 million; FY2026: $46,398 million.",
+    "question_type": "multi-year",
+    "source_reference": "Consolidated Statements of Income",
+    "source_page": 58
+  },
+  {
+    "id": "q008",
+    "user_input": "What was NIKE's net income in fiscal 2024, 2025 and 2026?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "FY2024: $5,700 million; FY2025: $3,219 million; FY2026: $3,108 million.",
+    "question_type": "multi-year",
+    "source_reference": "Consolidated Statements of Income",
+    "source_page": 58
+  },
+  {
+    "id": "q009",
+    "user_input": "What was NIKE's total shareholders' equity at May 31, 2026?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "$14,865 million.",
+    "question_type": "table-based",
+    "source_reference": "Consolidated Balance Sheets",
+    "source_page": 60
+  },
+  {
+    "id": "q010",
+    "user_input": "How does NIKE define comparable store sales?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "Revenues from NIKE-owned in-line and factory stores (excluding NIKE Brand Digital) that have been open at least one year, whose square footage has not changed by more than 15% in the past year, and that have not been permanently repositioned within the past year.",
+    "question_type": "definition",
+    "source_reference": "MD&A \u2013 Comparable Store Sales",
+    "source_page": 34
+  },
+  {
+    "id": "q011",
+    "user_input": "Which reportable segment had the highest EBIT in fiscal 2026, and how did it change from fiscal 2025?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "North America, with EBIT of $5,376 million, up 14% from $4,735 million.",
+    "question_type": "multi-hop",
+    "source_reference": "MD&A \u2013 Segment Information",
+    "source_page": 39
+  },
+  {
+    "id": "q012",
+    "user_input": "Why did NIKE Direct revenues decline in fiscal 2026 and which components fell?",
+    "retrieved_contexts": [
+      "Context text placeholder from vector DB"
+    ],
+    "response": "Model answer placeholder",
+    "reference": "Down 6% reported (8% currency-neutral) due to declines in NIKE Brand Digital sales of 12% (from $9.6 billion to $8.6 billion, driven by reduced traffic) and NIKE store sales of 4% ($9.1 billion vs $9.2 billion).",
+    "question_type": "multi-hop",
+    "source_reference": "MD&A \u2013 Fiscal 2026 Compared to Fiscal 2025",
+    "source_page": 36
+  }
+]
