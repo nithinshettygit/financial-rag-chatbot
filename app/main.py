@@ -1,8 +1,11 @@
 # app/main.py
 import asyncio
+import hashlib
 import os
+import time
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 import logfire
 from app.utils.cache import init_financial_cache
 from app.config import settings
@@ -53,6 +56,32 @@ logfire.instrument_httpx()
 async def health_check():
     return {"status": "healthy"}
 
+
+@app.middleware("http")
+async def request_tracking(request: Request, call_next):
+    request_id = uuid.uuid4().hex
+    started_at = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        logger.info(
+            "HTTP request",
+            extra={
+                "extra_data": {
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": status_code,
+                    "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                }
+            },
+        )
+
+
 @app.get("/health/ready")
 async def readiness_check():
     if not getattr(app.state, "ready", False):
@@ -64,7 +93,13 @@ async def chat_endpoint(request: ChatRequest):
     if not getattr(app.state, "ready", False):
         raise HTTPException(status_code=503, detail="Server is warming up models")
     try:
-        with logfire.span("Chat Request Execution", session_id=request.session_id, query=request.query):
+        query_hash = hashlib.sha256(request.query.encode("utf-8")).hexdigest()
+        with logfire.span(
+            "Chat Request Execution",
+            session_id=request.session_id,
+            query_length=len(request.query),
+            query_hash=query_hash,
+        ):
             return await asyncio.wait_for(run_rag_pipeline_async(request), timeout=REQUEST_TIMEOUT_S)
     except asyncio.TimeoutError:
         logfire.error("Request timed out", session_id=request.session_id)
