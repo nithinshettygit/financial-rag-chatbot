@@ -10,11 +10,11 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 
 from app.config import settings
 from app.pipeline import run_rag_pipeline_async, shutdown_pipeline, warmup_pipeline
-from app.queue import rag_queue
+from app.queue import QueueLease, rag_queue
 from app.schemas import ChatRequest, ChatResponse
 from app.security import enforce_chat_rate_limit, ensure_session, validate_security_settings
-from app.utils.cache import init_financial_cache
 from app.utils.logger import logger
+from app.utils.vector import VectorStoreError
 
 
 logfire.configure(
@@ -24,7 +24,25 @@ logfire.configure(
 )
 logfire.instrument_httpx()
 
-REQUEST_TIMEOUT_S = float(os.getenv("REQUEST_TIMEOUT_S", "40"))
+REQUEST_TIMEOUT_S = float(os.getenv("REQUEST_TIMEOUT_S", "80"))
+_QUEUE_SUPERVISORS: set[asyncio.Task] = set()
+
+
+async def _supervise_pipeline(task: asyncio.Task[ChatResponse], lease: QueueLease) -> None:
+    try:
+        renew_interval = max(0.5, settings.RAG_CONCURRENCY_LEASE_SECONDS / 3)
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=renew_interval)
+            if not done:
+                await rag_queue.renew(lease)
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as error:
+            logger.error("RAG task failed after request ended: %s", type(error).__name__)
+    finally:
+        await rag_queue.release(lease)
 
 
 @asynccontextmanager
@@ -36,7 +54,6 @@ async def lifespan(app: FastAPI):
     with logfire.span("Server Startup & Warmup"):
         try:
             await warmup_pipeline()
-            await asyncio.to_thread(init_financial_cache)
         except Exception:
             logger.exception("Warmup failed")
             raise
@@ -130,7 +147,20 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest):
     pipeline_request = chat_request.model_copy(update={"session_id": session_id})
     query_hash = hashlib.sha256(chat_request.query.encode("utf-8")).hexdigest()
 
-    lease = await rag_queue.acquire()
+    deadline = asyncio.get_running_loop().time() + REQUEST_TIMEOUT_S
+    try:
+        lease = await asyncio.wait_for(
+            rag_queue.acquire(),
+            timeout=max(0, deadline - asyncio.get_running_loop().time()),
+        )
+    except asyncio.TimeoutError:
+        logfire.error("Request timed out while waiting for a RAG slot", session_id=session_id)
+        raise HTTPException(status_code=504, detail="Request timed out")
+
+    pipeline_task = asyncio.create_task(run_rag_pipeline_async(pipeline_request))
+    supervisor = asyncio.create_task(_supervise_pipeline(pipeline_task, lease))
+    _QUEUE_SUPERVISORS.add(supervisor)
+    supervisor.add_done_callback(_QUEUE_SUPERVISORS.discard)
     try:
         with logfire.span(
             "Chat Request Execution",
@@ -140,19 +170,23 @@ async def chat_endpoint(request: Request, chat_request: ChatRequest):
             rag_slot=lease.member,
         ):
             return await asyncio.wait_for(
-                run_rag_pipeline_async(pipeline_request),
-                timeout=REQUEST_TIMEOUT_S,
+                asyncio.shield(pipeline_task),
+                timeout=max(0, deadline - asyncio.get_running_loop().time()),
             )
     except asyncio.TimeoutError:
         logfire.error("Request timed out", session_id=session_id)
         raise HTTPException(status_code=504, detail="Request timed out")
+    except VectorStoreError as error:
+        logger.error("Vector store unavailable: %s", type(error.__cause__).__name__ if error.__cause__ else "unknown")
+        raise HTTPException(status_code=503, detail="Financial document search is temporarily unavailable") from error
     except HTTPException:
         raise
     except Exception as error:
-        logfire.exception("Internal processing error: {error}", error=str(error))
+        logfire.error("Internal processing error", error_type=type(error).__name__)
         raise HTTPException(status_code=500, detail="Internal processing error")
     finally:
-        await rag_queue.release(lease)
+        if pipeline_task.done():
+            await supervisor
 
 
 if __name__ == "__main__":

@@ -13,10 +13,10 @@ from groq import Groq
 
 from app.config import settings
 from app.schemas import ChatRequest, ChatResponse, ContextChunk, SessionState
-from app.utils.llm import chat_with_retry, get_groq_clients
+from app.utils.llm import chat_with_retry, extract_completion_text, get_groq_clients
 from app.utils.router import QueryFilters, RoutePlan, SubQuery, build_filters, plan_query
 from app.utils.tokens import count_message_tokens, count_tokens, log_token_usage
-from app.utils.cache import CacheScope, build_scope, cache_lookup, cache_store
+from app.utils.cache import CacheScope, build_scope, cache_lookup, cache_store, init_financial_cache
 from app.utils.guard_rules import mask_pii
 from app.utils.intent_router import get_intent_router, warmup_intent_router
 from app.utils.pii import warmup_pii
@@ -41,7 +41,6 @@ from app.services.retrieval import (
     resolve_document_ids,
 )
 logger = logging.getLogger(__name__)
-from app.utils.cache import init_financial_cache
 
 
 def get_groq() -> Tuple[Groq, ...]:
@@ -50,10 +49,17 @@ def get_groq() -> Tuple[Groq, ...]:
 
 async def warmup_pipeline() -> None:
     t0 = time.perf_counter()
-    def _warm_vector(): get_vector().retrieve("warmup query", 1, None)
+    def _warm_vector():
+        vector = get_vector()
+        vector.ensure_filter_indexes()
+        vector.retrieve("warmup query", 1, None)
     def _warm_bm25(): get_bm25().retrieve("warmup query", 1, None)
     def _warm_reranker(): _get_reranker().rerank("warmup query", [{"content": "warmup"}], 1)
-    def _warm_cache(): init_financial_cache()  # pre-loads HFTextVectorizer, connects to Redis, creates L2 index
+    def _warm_cache():
+        try:
+            init_financial_cache()
+        except Exception as error:
+            logfire.error("Cache warmup failed; requests will use the cache fallback", error=type(error).__name__)
     def _warm_guard(): warmup_guardrails()      # builds NeMo LLMRails once (loads its small embedding model)
     def _warm_pii(): warmup_pii()               # loads Presidio + spaCy model once
     def _warm_intent(): warmup_intent_router()  # embeds the intent examples once
@@ -161,7 +167,7 @@ async def _llm(messages: List[Dict[str, str]], temperature: float):
             llm_span.set_attribute("llm_calls", 1)
             llm_span.set_attribute("token_count_source", "estimate")
             raise
-        answer = resp.choices[0].message.content.strip()
+        answer = extract_completion_text(resp)
         log_token_usage(llm_span, resp, estimated_input, count_tokens(answer))
         return answer, resp
 
@@ -263,12 +269,12 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
 
         if fast_path_ok and semantic_label == "smalltalk":
             root_span.set_attribute("path", "smalltalk")
-            root_span.set_attribute("query", raw_query)
+            root_span.set_attribute("query_hash", hashlib.sha256(raw_query.encode()).hexdigest())
             return await _answer_greeting(request, raw_query, root_span)
         if fast_path_ok and semantic_label == "out_of_scope":
             events.append("out_of_scope_fast")
             root_span.set_attribute("path", "out_of_scope")
-            root_span.set_attribute("query", raw_query)
+            root_span.set_attribute("query_hash", hashlib.sha256(raw_query.encode()).hexdigest())
             _mark()
             return _reply(request, REFUSAL_SCOPE, "general_chat", raw_query, state0)
 
@@ -288,12 +294,12 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
         if not guard_in.allowed:
             safe_query = await asyncio.to_thread(mask_pii, raw_query)   # never log / echo raw PII
             events.append(f"input_blocked:{guard_in.rail}")
-            root_span.set_attribute("query", safe_query)
+            root_span.set_attribute("query_hash", hashlib.sha256(safe_query.encode()).hexdigest())
             root_span.set_attribute("blocked_by", guard_in.rail or "")
             _mark()
             return _reply(request, guard_in.message or REFUSAL_SCOPE, "general_chat", safe_query, state0)
         query = guard_in.text                      # PII-masked from here on
-        root_span.set_attribute("query", query)
+        root_span.set_attribute("query_hash", hashlib.sha256(query.encode()).hexdigest())
         if query != raw_query:
             events.append("input_pii_masked")
         _mark()
@@ -308,7 +314,7 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             plan_span.set_attribute("intent", plan.intent)
             plan_span.set_attribute("followup_type", plan.followup_type)
             plan_span.set_attribute("entities", plan.entities)
-            plan_span.set_attribute("search_query", plan.search_query)
+            plan_span.set_attribute("search_query_hash", hashlib.sha256(plan.search_query.encode()).hexdigest())
 
         # --- 3-0. Out of scope (allow-list): anything that isn't filings Q&A, small talk, or a summary ---
         if plan.intent == "out_of_scope":
@@ -342,26 +348,12 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             return _reply(request, answer, plan.intent, plan.search_query, plan.state)
 
         # --- 4. Cache lookup (RAG only) ---
-        # Cached answers must be a pure function of (standalone question, scope, corpus):
+        # Cached answers must be a pure function of (standalone question, resolved document IDs, scope, corpus):
         #   none       -> key on the user's own wording; L1 + L2
         #   reference  -> key on the resolved standalone rewrite; L1 + L2
         #   elaboration-> depends on the previous answer: key on (wording + hash of previous answer); L1 only
         follow = plan.followup_type
         ctx = hashlib.sha1(_last_assistant(history).encode()).hexdigest()[:12] if follow == "elaboration" else ""
-        scope = build_scope(plan.intent, plan.entities, plan.years, corpus_version(catalog), ctx)
-        semantic = follow != "elaboration"
-        cache_text = plan.search_query if follow == "reference" else query
-
-        cached = await asyncio.to_thread(cache_lookup, cache_text, scope, semantic)
-        if cached:
-            root_span.set_attribute("cache_hit", True)
-            root_span.set_attribute("cache_tier", cached.get("_tier", ""))
-            cached_chunks = [ContextChunk(**c) if isinstance(c, dict) else c for c in cached.get("retrieved_chunks", [])]
-            return _reply(request, cached["answer"], cached.get("intent", plan.intent),
-                          cached.get("search_query", plan.search_query), plan.state, cached_chunks)
-        root_span.set_attribute("cache_hit", False)
-
-        # --- 5. Retrieval ---
         entity_filters = {}
         missing = []
         for entity in plan.entities or [None]:
@@ -376,6 +368,32 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             return _reply(request, f"I couldn't find financial documents for {requested}. Check the company name and then try again.",
                           plan.intent, plan.search_query, plan.state)
 
+        selected_document_ids = sorted({
+            document_id
+            for filters in entity_filters.values()
+            for document_id in filters.document_ids or []
+        })
+        scope = build_scope(
+            plan.intent,
+            plan.entities,
+            plan.years,
+            corpus_version(catalog),
+            ctx,
+            selected_document_ids,
+        )
+        semantic = follow != "elaboration"
+        cache_text = plan.search_query if follow == "reference" else query
+
+        cached = await asyncio.to_thread(cache_lookup, cache_text, scope, semantic)
+        if cached:
+            root_span.set_attribute("cache_hit", True)
+            root_span.set_attribute("cache_tier", cached.get("_tier", ""))
+            cached_chunks = [ContextChunk(**c) if isinstance(c, dict) else c for c in cached.get("retrieved_chunks", [])]
+            return _reply(request, cached["answer"], cached.get("intent", plan.intent),
+                          cached.get("search_query", plan.search_query), plan.state, cached_chunks)
+        root_span.set_attribute("cache_hit", False)
+
+        # --- 5. Retrieval ---
         sub_queries = [sq for sq in plan.sub_queries if sq.entity in entity_filters]
         if not sub_queries:
             sub_queries = [SubQuery(text=plan.search_query, entity=next(iter(entity_filters)))]

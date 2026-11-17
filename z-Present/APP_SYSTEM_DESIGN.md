@@ -119,7 +119,7 @@ flowchart TD
 | [`utils/bm25.py`](../app/utils/bm25.py) | Local manifest loading, lexical index creation, metadata-aware query filtering and BM25 ranking. |
 | [`utils/flashrank_reranker.py`](../app/utils/flashrank_reranker.py) | Relevance reranking, financial metadata enrichment, per-company rerank/interleave. |
 | [`utils/cache.py`](../app/utils/cache.py) | Exact Redis L1 and scoped semantic RedisVL L2 answer cache. |
-| [`utils/guardrails.py`](../app/utils/guardrails.py) | Async NeMo rails wrapper, timeouts, deterministic fail-open fallback, user-facing refusal selection. |
+| [`utils/guardrails.py`](../app/utils/guardrails.py) | Async NeMo rails wrapper, configured secondary-provider fallback, fail-closed error handling, and refusal selection. |
 | [`utils/guard_rules.py`](../app/utils/guard_rules.py) | Dependency-light injection, prompt-leak, and numeric-grounding checks. |
 | [`utils/pii.py`](../app/utils/pii.py) | Presidio/spaCy PII analysis, API-key pattern removal, regex fallback. |
 | [`utils/llm.py`](../app/utils/llm.py) | Groq client reuse, rate-limit-aware retry, API-key rotation, bounded retry wait. |
@@ -213,7 +213,7 @@ or a fallback label such as `"N/A"`.
 |---|---|
 | `GET /health` | Returns `{"status": "healthy"}`. This is a process liveness response; it does not assert model/cache readiness. |
 | `GET /health/ready` | Returns `{"status": "ready"}` only after startup warmup; otherwise HTTP 503. |
-| `POST /v1/chat` | Rejects before readiness with HTTP 503; validates the request; waits up to `REQUEST_TIMEOUT_S`; returns a `ChatResponse`, HTTP 504 for server timeout, and HTTP 500 for an unexpected exception. |
+| `POST /v1/chat` | Rejects before readiness with HTTP 503; validates the request; applies `REQUEST_TIMEOUT_S` to queue wait plus pipeline execution; returns a `ChatResponse`, HTTP 504 for server timeout, HTTP 503 for unavailable Qdrant/Redis controls, and HTTP 500 for an unexpected exception. A timed-out RAG task retains its queue lease until it finishes. |
 
 Pydantic validation failures use FastAPI’s standard request-validation
 response. Explicit `HTTPException`s are re-raised unchanged by the chat
@@ -377,10 +377,12 @@ hints used later in planning; they are not direct endpoint responses.
    attributes are attached to a Logfire span. A compact list of guardrail
    events is attached to the request root span.
 
-If NeMo errors or times out, `GUARDRAILS_FAIL_OPEN=true` uses deterministic
-injection checks and PII masking only. If fail-open is false, the request
-returns a temporary-unavailability refusal. The deterministic fallback does
-not run the LLM policy classifier.
+If the primary NeMo provider errors or times out, a distinct configured fallback
+Groq key is tried under the same policy. If both providers fail, the default
+fail-closed policy blocks the request with a temporary-unavailability refusal.
+`GUARDRAILS_FAIL_OPEN` is disabled by default; only an explicit override
+enables deterministic injection checks and PII masking without the LLM policy
+classifier.
 
 #### Stage 3 — Catalog and query planning
 
@@ -424,8 +426,9 @@ inventory operation.
 
 #### Stage 5 — Scoped cache lookup (financial RAG only)
 
-1. Build `CacheScope` from intent, normalized entities, requested years,
-   corpus version, and optional elaboration-context hash.
+1. Resolve the applicable document IDs and build `CacheScope` from intent,
+   normalized entities, requested years, document-ID fingerprint, corpus
+   version, and optional elaboration-context hash.
 2. Normal queries use the current safe query as cache text. Reference
    follow-ups use the standalone rewritten query. Elaboration uses the current
    query plus a hash of the previous assistant answer in scope.
@@ -552,7 +555,8 @@ answer generation or caching.
 
 - safe current query;
 - at most the most recent four conversation turns, bounded by
-  `MAX_HISTORY_TURNS` (default 6); user turns are supplied in full and
+  `MAX_HISTORY_TURNS` (default 6); incoming history is capped at 12 messages
+  and 2,000 characters per message; user turns are supplied in full and
   assistant turns are truncated to 600 characters for the router prompt;
 - current session state;
 - catalog company names;
@@ -640,6 +644,9 @@ returned state on the next request.
 - returns empty results when the configured collection does not exist;
 - embeds the query, calls Qdrant `query_points()` with the configured named
   vector and `RETRIEVAL_K` default 30;
+- ensures document, company, and fiscal-year payload indexes during startup
+  for existing collections, with a filtered-search fallback for collections
+  created later or missing indexes;
 - applies document ID filters and, when requested, year/company filters.
   Year and company matching allow missing fiscal-year/company fields in the
   Qdrant filter expressions;
@@ -780,9 +787,9 @@ figures have been interpreted with the correct accounting meaning.
 
 ### 10.5 Fail-open mode and fast paths
 
-- With `GUARDRAILS_FAIL_OPEN=true`, a NeMo error or timeout falls back to
-  deterministic injection/length heuristics and PII masking. It does not run
-  the LLM policy self-check.
+- With `GUARDRAILS_FAIL_OPEN=false` (default), a NeMo error or timeout blocks
+  the request. Setting it true uses deterministic injection/length heuristics
+  and PII masking without running the LLM policy self-check.
 - With fail-open disabled, input/output rail errors return a temporary
   refusal.
 - Clean, high-confidence semantic smalltalk/out-of-scope paths bypass the
@@ -803,6 +810,7 @@ figures have been interpreted with the correct accounting meaning.
 - intent;
 - normalized, sorted entity set (or `global`);
 - sorted fiscal-year set (or `any`);
+- fingerprint of the resolved document ID set (or `any`);
 - corpus version;
 - optional prior-answer hash for elaborations.
 
@@ -821,7 +829,7 @@ may not change it.
 ### 11.3 L2 semantic cache
 
 - RedisVL vector index uses 384-dimensional BGE-small embeddings.
-- Filter fields: entity, year, intent, corpus.
+- Filter fields: entity, year, document ID, intent, corpus.
 - Only the closest candidate is considered.
 - Reject candidates with cosine distance greater than `CACHE_MAX_DISTANCE`
   (default `0.04`).
@@ -949,7 +957,7 @@ controls are read directly from the environment in `main.py`,
 | `RRF_K` | 60 | Reciprocal-rank fusion constant. |
 | `MAX_HISTORY_TURNS` | 6 | Router history boundary and helper default; individual paths apply their own smaller slices. |
 | `MAX_CONTEXT_TOKENS` | 4096 | Maximum packed evidence context. |
-| `REQUEST_TIMEOUT_S` | 40 | API request deadline; read directly by `main.py`. |
+| `REQUEST_TIMEOUT_S` | 80 | Total API deadline including queue wait; the queue lease remains active until timed-out work finishes. |
 | `RERANK_CANDIDATES` | 30 | Retrieval candidate target; direct environment variable. |
 | `FINAL_TOP_K` | 5 | Final result base; direct environment variable takes precedence in the retrieval service. |
 | `MAX_FINAL_TOP_K` | 10 | Cap floor for multi-entity selection; direct environment variable. |
@@ -976,7 +984,7 @@ controls are read directly from the environment in `main.py`,
 | `GUARDRAILS_PATH` | `app/guardrails_config` | NeMo config directory. |
 | `GUARDRAIL_LLM_MODEL` | `openai/gpt-oss-20b` | NeMo policy model. |
 | `GUARDRAILS_TIMEOUT_S` | 8 seconds | Timeout per NeMo check. |
-| `GUARDRAILS_FAIL_OPEN` | true | Use deterministic fallback on rail failure. |
+| `GUARDRAILS_FAIL_OPEN` | false | Fail closed on rail failure; true enables deterministic fallback only. |
 | `GUARDRAILS_NUMERIC_CHECK` | true | Enable numeric evidence check. |
 | `PII_ENGINE` | `presidio` | `presidio` or regex-only mode. |
 | `PII_SPACY_MODEL` | `en_core_web_sm` | Presidio NLP model. |

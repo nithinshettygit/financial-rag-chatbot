@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # Distributed RAG concurrency / waiting queue
     # ------------------------------------------------------------------ #
-    MAX_CONCURRENT_RAG: int = Field(default=2, gt=0)
+    MAX_CONCURRENT_RAG: int = Field(default=1, gt=0)
     MAX_QUEUE_WAITERS: int = Field(default=10, gt=0)
     RAG_QUEUE_MAX_WAIT_SECONDS: int = Field(default=15, gt=0)
     RAG_QUEUE_POLL_INTERVAL_SECONDS: float = Field(default=0.25, gt=0)
@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     GUARDRAILS_PATH: str = "app/guardrails_config"
     GUARDRAIL_LLM_MODEL: str = "openai/gpt-oss-20b"
     GUARDRAILS_TIMEOUT_S: float = 8.0
-    GUARDRAILS_FAIL_OPEN: bool = True
+    GUARDRAILS_FAIL_OPEN: bool = False
     GUARDRAILS_NUMERIC_CHECK: bool = True
 
     # ------------------------------------------------------------------ #

@@ -69,6 +69,17 @@ function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`
 }
 
+function retryDelayMs(response: Response): number | null {
+  const retryAfter = response.headers.get('Retry-After')?.trim()
+  if (!retryAfter) return null
+
+  const seconds = Number(retryAfter)
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
+
+  const retryAt = Date.parse(retryAfter)
+  return Number.isNaN(retryAt) ? null : Math.max(0, retryAt - Date.now())
+}
+
 function BotIcon() {
   return (
     <svg className="bot-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -236,7 +247,7 @@ function App() {
     setRetryRequest(null)
 
     try {
-      const response = await fetch(apiUrl('/v1/chat'), {
+      const requestOptions: RequestInit = {
         method: 'POST',
         credentials: 'include',
         headers: {
@@ -247,7 +258,16 @@ function App() {
           history,
           state: sessionState,
         }),
-      })
+      }
+
+      let response = await fetch(apiUrl('/v1/chat'), requestOptions)
+      if (response.status === 429) {
+        const delay = retryDelayMs(response)
+        if (delay !== null && delay <= 60_000) {
+          await new Promise((resolve) => window.setTimeout(resolve, delay))
+          response = await fetch(apiUrl('/v1/chat'), requestOptions)
+        }
+      }
 
       if (!response.ok) {
         throw new Error(await responseMessage(response))
@@ -286,7 +306,9 @@ function App() {
     const query = input.trim()
     if (!query || apiStatus !== 'ready' || isSending) return
 
-    const history = messages.map(({ role, content }) => ({ role, content }))
+    const history = messages
+      .slice(-12)
+      .map(({ role, content }) => ({ role, content: content.slice(-2000) }))
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     void sendMessage(query, history, true)

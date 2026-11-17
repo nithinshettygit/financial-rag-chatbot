@@ -10,3 +10,7 @@ data/qdrant_storage_backup
 data/temp_uploads
 **/__pycache__
 *.pyc
+deploy/certs
+deploy/secrets
+venv312
+unused/

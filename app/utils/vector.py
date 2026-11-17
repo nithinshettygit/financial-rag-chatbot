@@ -1,10 +1,16 @@
 import os
+import threading
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from fastembed import TextEmbedding
 from app.config import settings
 from app.utils.router import QueryFilters
 from typing import List, Dict, Any, Optional
+
+
+class VectorStoreError(RuntimeError):
+    """Raised when a Qdrant request fails instead of returning an empty result."""
+
 
 class QdrantVectorRetriever:
     def __init__(self):
@@ -21,15 +27,18 @@ class QdrantVectorRetriever:
             )
         else:
             self.client = QdrantClient(path=settings.QDRANT_STORAGE_PATH)
+        self._payload_indexes_ready = False
+        self._payload_index_lock = threading.Lock()
 
     def list_documents(self) -> List[Dict[str, Any]]:
-        if not self.client.collection_exists(settings.COLLECTION_NAME):
+        if not self._collection_exists():
             return []
 
         documents = {}
         offset = None
         while True:
-            points, offset = self.client.scroll(
+            points, offset = self._qdrant_call(
+                self.client.scroll,
                 collection_name=settings.COLLECTION_NAME,
                 limit=1000,
                 offset=offset,
@@ -74,8 +83,11 @@ class QdrantVectorRetriever:
         top_k: int = settings.RETRIEVAL_K,
         filters: Optional[QueryFilters] = None,
     ) -> List[Dict[str, Any]]:
-        if not self.client.collection_exists(settings.COLLECTION_NAME):
+        if not self._collection_exists():
             return []
+
+        if filters and (filters.document_ids or filters.years or filters.company):
+            self._ensure_payload_indexes()
 
         vector = next(self.embedding_model.query_embed(query)).tolist()
         
@@ -131,13 +143,14 @@ class QdrantVectorRetriever:
 
         query_filter = models.Filter(must=must_conditions) if must_conditions else None
 
-        result = self.client.query_points(
+        result = self._qdrant_call(
+            self.client.query_points,
             collection_name=settings.COLLECTION_NAME,
             query=vector,
             using=settings.VECTOR_NAME,
             limit=top_k,
             query_filter=query_filter,
-            with_payload=True
+            with_payload=True,
         )
 
         chunks = []
@@ -178,3 +191,41 @@ class QdrantVectorRetriever:
             })
 
         return chunks
+
+    def _collection_exists(self) -> bool:
+        return bool(self._qdrant_call(self.client.collection_exists, settings.COLLECTION_NAME))
+
+    def ensure_filter_indexes(self) -> None:
+        if self._collection_exists():
+            self._ensure_payload_indexes()
+
+    def _ensure_payload_indexes(self) -> None:
+        if self._payload_indexes_ready:
+            return
+
+        with self._payload_index_lock:
+            if self._payload_indexes_ready:
+                return
+
+            index_fields = (
+                ("document_id", models.PayloadSchemaType.KEYWORD),
+                ("company", models.PayloadSchemaType.KEYWORD),
+                ("fiscal_year", models.PayloadSchemaType.INTEGER),
+                ("fiscal_years", models.PayloadSchemaType.INTEGER),
+            )
+            for field_name, schema in index_fields:
+                self._qdrant_call(
+                    self.client.create_payload_index,
+                    collection_name=settings.COLLECTION_NAME,
+                    field_name=field_name,
+                    field_schema=schema,
+                    wait=True,
+                )
+            self._payload_indexes_ready = True
+
+    @staticmethod
+    def _qdrant_call(operation, *args, **kwargs):
+        try:
+            return operation(*args, **kwargs)
+        except Exception as error:
+            raise VectorStoreError("Qdrant request failed") from error

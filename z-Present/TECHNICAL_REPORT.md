@@ -194,9 +194,9 @@ return a refusal, and the raw request is not echoed as the search query in the
 response. Prior turns are passed through `_sanitize_history()` before use in
 query planning.
 
-If NeMo fails or times out, the configured fallback path uses deterministic
-injection checks and PII masking when `GUARDRAILS_FAIL_OPEN` is true. When it is
-false, the request is blocked with a temporary-unavailability message.
+If NeMo fails or times out, deterministic injection checks and PII masking are
+used only when `GUARDRAILS_FAIL_OPEN` is explicitly true. The default is
+fail-closed, blocking the request with a temporary-unavailability message.
 
 ### Stage 4 — Catalog lookup and query planning
 
@@ -253,6 +253,7 @@ RAG cache keys are built from a `CacheScope` containing:
 - intent;
 - normalized entity set;
 - requested year set;
+- fingerprint of the resolved document ID set;
 - a corpus version derived from catalog document IDs and chunk counts; and
 - for elaborations, a hash of the previous assistant answer.
 
@@ -265,7 +266,7 @@ depends on prior conversation context.
 
 - **L1 exact cache:** Redis string lookup keyed by scope and normalized text.
 - **L2 semantic cache:** RedisVL vector search using BGE-small embeddings,
-  filtered by intent/entity/year/corpus scope.
+  filtered by intent/entity/year/document/corpus scope.
 - **Lexical verification:** semantic candidates must satisfy a distance
   threshold and sufficient content-term overlap; number sets must match.
 
@@ -404,7 +405,10 @@ follow-ups) be converted into explicit search targets and constraints.
 - `list_documents()` scans collection payloads and groups points by document
   and source file to provide the planning catalog.
 - `retrieve()` embeds a query, applies supported metadata filters, requests
-  top-k named-vector results, and normalizes payload data for downstream use.
+  top-k named-vector results, ensures required document/company/year payload
+  indexes exist, and normalizes payload data for downstream use. Existing
+  collection indexes are checked during startup warmup to avoid charging this
+  one-time setup to a chat request.
 
 ### `app/utils/bm25.py` — local lexical search
 
@@ -532,14 +536,14 @@ ChatRequest
 | Unexpected pipeline exception | Logged with Logfire and returned as HTTP 500. |
 | Semantic intent router unavailable | Falls through to LLM routing; regex greeting fallback is available. |
 | Query router LLM fails | Returns an empty routing object; deterministic/default planning continues. |
-| One retriever fails | `_safe_call()` logs the failure and supplies an empty ranking, allowing the other retriever to contribute. |
+| BM25 retriever fails | `_safe_call()` logs the failure and supplies an empty ranking. Qdrant failures are propagated and returned as HTTP 503 rather than misreported as empty results. |
 | Strict metadata retrieval yields too few results | Retries without year/company constraints while preserving document IDs. |
 | FlashRank fails | Returns initial candidate order with fallback scores. |
 | Cache read/write fails | Logs the failure; request continues without a cache hit/store. |
-| NeMo rails fail or time out | Deterministic fallback or temporary refusal depends on `GUARDRAILS_FAIL_OPEN`. |
+| Primary NeMo provider fails or times out | Try the distinct configured fallback Groq key; if both fail, the default is fail-closed with a temporary refusal. Deterministic fallback remains opt-in. |
 | Numeric output check blocks | One stricter generation retry; if still blocked, return a verification refusal and do not cache. |
 | Incomplete multi-entity retrieval | Answer may include a missing-company note; it is not cached. |
-| Startup warmup/cache initialization fails | Startup error is logged and re-raised; readiness is not set true. |
+| Startup warmup fails | Startup error is logged and re-raised; readiness is not set true. Cache initialization failures are logged, and the API starts without cache. |
 
 ## 9. Operational notes and current limitations
 

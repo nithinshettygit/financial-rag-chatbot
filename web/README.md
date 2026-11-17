@@ -24,26 +24,24 @@ This React + TypeScript frontend uses the existing FastAPI endpoints:
 
 Vite proxies `/health` and `/v1` to `VITE_API_PROXY_TARGET` (default
 `http://127.0.0.1:8000`), so local development does not require permissive
-FastAPI CORS settings. `/v1/chat` requires an `X-API-Key` header. Configure
-`CHAT_API_KEYS` on the API as a JSON object mapping client names to unique,
-random secrets of at least 32 bytes. Generate a secret with
-`python -c "import secrets; print(secrets.token_urlsafe(32))"`, then set the
-API environment to `CHAT_API_KEYS='{"web":"<generated-secret>"}'`. Paste that
-key into the API key field in the app sidebar; it is held in memory for the
-current page only and sent over the local proxy.
+FastAPI CORS settings. `/v1/chat` establishes a browser session with a signed,
+HttpOnly cookie; the client does not send an API key.
 
-The API uses Redis to enforce a shared per-key limit
-(`CHAT_RATE_LIMIT_REQUESTS` per `CHAT_RATE_LIMIT_WINDOW_SECONDS`, default 20
-requests per 60 seconds). Requests over the limit receive `429` and
-`Retry-After`; if Redis is unavailable, chat requests fail closed with `503`.
-`/health` and `/health/ready` remain unauthenticated.
+The API uses Redis to enforce shared per-session and per-IP limits
+(`CHAT_SESSION_RATE_LIMIT_REQUESTS` and `CHAT_IP_RATE_LIMIT_REQUESTS`, default
+20 and 60 requests per 60 seconds). Requests over the limit receive `429` and
+`Retry-After`; the frontend retries once when the delay is at most 60 seconds.
+If Redis is unavailable, admission fails closed with `503`. Chat queries must
+contain non-whitespace text (up to 2,000 characters); history is capped at 12
+messages with at most 2,000 characters per message. `/health` and
+`/health/ready` remain unauthenticated.
 
 ## Production
 
 See the repository's [production deployment guide](../deploy/README.md) for
 the Nginx and Docker Compose setup. Never place a shared production API key in
-frontend code or a `VITE_*` variable. Use distinct API keys when clients need
-independent rate limits.
+frontend code or a `VITE_*` variable. Guardrails fail closed if the guardrail
+service is unavailable.
 
 The frontend does not persist conversation history across page reloads.
 

@@ -5,7 +5,8 @@ This Compose deployment is a single-host production baseline:
 - Nginx serves the built React app, terminates HTTPS, and is the only service
   publishing host ports.
 - Nginx applies a coarse per-IP request/connection limit. FastAPI continues to
-  authenticate `X-API-Key` and enforce a shared per-key Redis limit.
+  authenticate browser sessions with a signed, HttpOnly cookie and enforce
+  shared per-session and per-IP Redis limits.
 - FastAPI and the Streamlit admin UI use separate private backend networks.
   Redis Stack (for RedisVL search) is API-only; Qdrant is shared by the API and
   admin UI. Neither database is published to the host.
@@ -39,17 +40,20 @@ docker run --rm \
   'python -m pip install pip-tools && pip-compile --resolver=backtracking --strip-extras -o requirements-eval.txt requirements-eval.in'
 ```
 
-1. Copy `.env.production.example` to `.env.production`.
+1. Copy `.env.production.example` to `.env.production`. The checked-in files
+   contain placeholders only; replace them before deployment.
 2. Set `GROQ_API_KEY`, then generate distinct high-entropy values for
-   `CHAT_API_KEYS`, `REDIS_PASSWORD`, `QDRANT_API_KEY`, and `ADMIN_PASSWORD`.
-   API keys must be at least 32 bytes. For example:
+   `SESSION_HMAC_SECRET`, `REDIS_PASSWORD`, `QDRANT_API_KEY`, and
+   `ADMIN_PASSWORD`. The session secret must be at least 32 bytes. Generate
+   random values with:
 
    ```sh
    python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
    ```
 
-   `CHAT_API_KEYS` must be a JSON object; each entry is a distinct client and
-   receives an independent rate-limit bucket.
+   `FALLBACK_GROQ_API_KEY` is optional and must be a different key if set.
+   Startup checks credential presence and basic format locally; it does not
+   contact credential providers or log secret values.
 3. Generate a separate Nginx admin password file. Do not reuse
    `ADMIN_PASSWORD`:
 
@@ -71,12 +75,12 @@ docker run --rm \
 5. Edit both `server_name example.com` entries in
    `deploy/nginx/default.conf` to the deployed DNS name.
 
-The React app sends chat requests directly to `/v1/chat`. Production clients
-must supply their own `X-API-Key`; the bundled UI accepts a per-client key in
-the sidebar and keeps it in memory only for the current page. Never embed a
-shared key in the static bundle or add it as a `VITE_*` setting. The Nginx
-per-IP limit is only an additional guard and does not replace per-key
-accounting.
+The React app sends same-origin chat requests directly to `/v1/chat`. The API
+issues a signed, HttpOnly session cookie; the browser does not need an API key.
+FastAPI enforces shared per-session and per-IP Redis limits. If Redis is
+unavailable, chat admission fails closed with `503`; cache operations degrade
+to uncached requests and Redis reconnects automatically. The frontend retries
+a `429` once when `Retry-After` is no more than 60 seconds.
 
 ## Start, inspect, and update
 
@@ -109,9 +113,11 @@ docker compose --env-file .env.production restart api
 ```
 
 The API adds an `X-Request-ID` to each response and logs request method, path,
-status, and latency without the request body. Chat spans record only the query
-length and SHA-256 hash, not the query text. The chat proxy timeout is bounded
-at 55 seconds, above the API's 40-second request timeout.
+status, and latency without the request body. Chat spans and cache telemetry record only query hashes, not query text. A
+timed-out request returns `504` while its concurrency slot remains leased until
+the underlying RAG task finishes. The chat proxy timeout is bounded
+at 55 seconds, above the API's 40-second total request deadline, including
+queue wait.
 
 Keep the admin route on a private network or restrict it at the host
 firewall/VPN layer even though both login gates are enabled.

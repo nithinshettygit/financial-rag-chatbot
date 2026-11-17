@@ -107,15 +107,12 @@ def seed_database(
         ("fiscal_years", models.PayloadSchemaType.INTEGER),
     ]
     for field_name, schema in index_fields:
-        try:
-            client.create_payload_index(
-                collection_name=COLLECTION_NAME,
-                field_name=field_name,
-                field_schema=schema,
-                wait=True,
-            )
-        except Exception:
-            pass  # Index already exists or handle gracefully
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name=field_name,
+            field_schema=schema,
+            wait=True,
+        )
     with logfire.span("generate_embeddings", model=VECTOR_NAME, count=len(valid_chunks)):
         embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
         texts = [str(c.get("embedding_text") or c.get("content")).strip() for c in valid_chunks]

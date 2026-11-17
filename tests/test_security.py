@@ -1,18 +1,17 @@
 import asyncio
 import threading
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
-from fastapi import Depends, FastAPI, HTTPException, Response
-from fastapi.testclient import TestClient
+from fastapi import HTTPException, Request, Response
 from redis.exceptions import RedisError
 
 from app.config import settings
 from app.security import (
-    authenticate_api_key,
+    create_session_token,
     enforce_chat_rate_limit,
     validate_security_settings,
+    verify_session_token,
 )
 
 
@@ -21,10 +20,18 @@ class FakeRedis:
         self.counts: dict[str, int] = {}
         self.lock = threading.Lock()
 
-    def eval(self, _script: str, _key_count: int, key: str, _ttl: int) -> int:
+    def eval(self, _script: str, _key_count: int, session_key: str, ip_key: str,
+             session_limit: int, ip_limit: int, _ttl: int) -> list[int]:
         with self.lock:
-            self.counts[key] = self.counts.get(key, 0) + 1
-            return self.counts[key]
+            session_count = self.counts.get(session_key, 0)
+            ip_count = self.counts.get(ip_key, 0)
+            if session_count >= session_limit or ip_count >= ip_limit:
+                return [session_count, ip_count, 0]
+            session_count += 1
+            ip_count += 1
+            self.counts[session_key] = session_count
+            self.counts[ip_key] = ip_count
+            return [session_count, ip_count, 1]
 
 
 class BrokenRedis:
@@ -32,86 +39,70 @@ class BrokenRedis:
         raise RedisError("offline")
 
 
+def make_request(session_id: str = "session-one", ip: str = "203.0.113.8") -> Request:
+    return Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/v1/chat",
+        "headers": [(b"x-real-ip", ip.encode())],
+        "client": (ip, 1234),
+        "state": {"session_id": session_id},
+    })
+
+
 class SecurityTests(unittest.TestCase):
-    def test_chat_route_authenticates_and_limits_each_api_key(self) -> None:
-        app = FastAPI()
+    def test_signed_session_token_rejects_tampering(self) -> None:
+        with patch.object(settings, "SESSION_HMAC_SECRET", "s" * 32):
+            token = create_session_token()
+            session_id = token.split(".", 1)[0]
+            self.assertEqual(verify_session_token(token), session_id)
+            self.assertIsNone(verify_session_token(token + "tampered"))
+            self.assertIsNone(verify_session_token(None))
 
-        @app.post("/v1/chat", dependencies=[Depends(enforce_chat_rate_limit)])
-        async def chat() -> dict[str, bool]:
-            return {"ok": True}
-
-        key_one = "a" * 32
-        key_two = "b" * 32
-        redis_client = FakeRedis()
-        with (
-            patch.object(settings, "CHAT_API_KEYS", {"web": key_one, "integration": key_two}),
-            patch.object(settings, "CHAT_RATE_LIMIT_REQUESTS", 1),
-            patch.object(settings, "CHAT_RATE_LIMIT_WINDOW_SECONDS", 60),
-            patch("app.security.get_redis_client", return_value=redis_client),
-            patch("app.security.time", SimpleNamespace(time=lambda: 1_700_000_000)),
-        ):
-            client = TestClient(app)
-            self.assertEqual(client.post("/v1/chat").status_code, 401)
-            self.assertEqual(
-                client.post("/v1/chat", headers={"X-API-Key": key_one}).status_code,
-                200,
-            )
-            self.assertEqual(
-                client.post("/v1/chat", headers={"X-API-Key": key_two}).status_code,
-                200,
-            )
-            limited = client.post("/v1/chat", headers={"X-API-Key": key_one})
-            self.assertEqual(limited.status_code, 429)
-            self.assertIn("Retry-After", limited.headers)
-
-    def test_startup_rejects_missing_api_key_configuration(self) -> None:
-        with patch.object(settings, "CHAT_API_KEYS", {}):
-            with self.assertRaises(RuntimeError):
-                validate_security_settings()
-        with patch.object(settings, "CHAT_API_KEYS", {"web": "too-short"}):
-            with self.assertRaises(RuntimeError):
-                validate_security_settings()
-
-    def test_api_keys_are_authenticated_without_returning_the_secret(self) -> None:
-        key = "a" * 32
-
-        digest = authenticate_api_key(key, {"web": key})
-
-        self.assertEqual(len(digest), 64)
-        self.assertNotEqual(digest, key)
-
-    def test_missing_or_invalid_api_keys_are_rejected(self) -> None:
-        with self.assertRaises(HTTPException) as missing:
-            authenticate_api_key(None, {"web": "a" * 32})
-        self.assertEqual(missing.exception.status_code, 401)
-
-        with self.assertRaises(HTTPException) as invalid:
-            authenticate_api_key("wrong", {"web": "a" * 32})
-        self.assertEqual(invalid.exception.status_code, 401)
-
-    def test_rate_limit_blocks_requests_after_the_configured_limit(self) -> None:
+    def test_chat_rate_limit_blocks_at_the_session_limit(self) -> None:
         redis_client = FakeRedis()
         with (
             patch("app.security.get_redis_client", return_value=redis_client),
-            patch.object(settings, "CHAT_RATE_LIMIT_REQUESTS", 1),
+            patch.object(settings, "CHAT_SESSION_RATE_LIMIT_REQUESTS", 2),
+            patch.object(settings, "CHAT_IP_RATE_LIMIT_REQUESTS", 5),
             patch.object(settings, "CHAT_RATE_LIMIT_WINDOW_SECONDS", 60),
-            patch("app.security.time", SimpleNamespace(time=lambda: 1_700_000_000)),
+            patch("app.security.time.time", return_value=1_700_000_000),
         ):
-            first_response = Response()
-            asyncio.run(enforce_chat_rate_limit(first_response, "b" * 64))
-            self.assertEqual(first_response.headers["X-RateLimit-Remaining"], "0")
+            first_response, second_response = Response(), Response()
+            asyncio.run(enforce_chat_rate_limit(make_request(), first_response))
+            asyncio.run(enforce_chat_rate_limit(make_request(), second_response))
+            self.assertEqual(second_response.headers["X-RateLimit-Session-Remaining"], "0")
 
             with self.assertRaises(HTTPException) as limited:
-                asyncio.run(enforce_chat_rate_limit(Response(), "b" * 64))
+                asyncio.run(enforce_chat_rate_limit(make_request(), Response()))
             self.assertEqual(limited.exception.status_code, 429)
             self.assertIn("Retry-After", limited.exception.headers)
 
-    def test_redis_failure_fails_closed(self) -> None:
+    def test_redis_rate_limit_failure_fails_closed(self) -> None:
         with patch("app.security.get_redis_client", return_value=BrokenRedis()):
             with self.assertRaises(HTTPException) as unavailable:
-                asyncio.run(enforce_chat_rate_limit(Response(), "b" * 64))
+                asyncio.run(enforce_chat_rate_limit(make_request(), Response()))
         self.assertEqual(unavailable.exception.status_code, 503)
 
+    def test_security_and_credentials_are_validated_without_provider_calls(self) -> None:
+        with (
+            patch.object(settings, "GROQ_API_KEY", "gsk_" + "a" * 24),
+            patch.object(settings, "FALLBACK_GROQ_API_KEY", "gsk_" + "b" * 24),
+            patch.object(settings, "QDRANT_URL", None),
+            patch.object(settings, "QDRANT_API_KEY", None),
+            patch.object(settings, "SESSION_HMAC_SECRET", "s" * 32),
+            patch.object(settings, "SESSION_COOKIE_SAMESITE", "lax"),
+            patch.object(settings, "SESSION_COOKIE_SECURE", True),
+        ):
+            validate_security_settings()
+
+    def test_placeholder_credentials_are_rejected_locally(self) -> None:
+        with (
+            patch.object(settings, "GROQ_API_KEY", "replace-with-a-valid-groq-api-key"),
+            patch.object(settings, "FALLBACK_GROQ_API_KEY", None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "GROQ_API_KEY"):
+                validate_security_settings()
 
 if __name__ == "__main__":
     unittest.main()

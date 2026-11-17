@@ -5,6 +5,7 @@ import ipaddress
 import secrets
 import time
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, Response
 from redis.exceptions import RedisError
@@ -130,7 +131,7 @@ async def enforce_chat_rate_limit(request: Request, response: Response) -> None:
             retry_after,
         )
     except RedisError as error:
-        logger.error("Chat rate limiter unavailable: %s", error)
+        logger.error("Chat rate limiter unavailable: %s", type(error).__name__)
         raise HTTPException(
             status_code=503,
             detail="Chat rate limiting is temporarily unavailable",
@@ -153,6 +154,32 @@ async def enforce_chat_rate_limit(request: Request, response: Response) -> None:
 
 
 def validate_security_settings() -> None:
+    def is_placeholder(value: str) -> bool:
+        normalized = value.strip().lower()
+        return any(marker in normalized for marker in ("replace-with", "change-me", "placeholder", "your-key"))
+
+    groq_key = settings.GROQ_API_KEY.strip()
+    if not groq_key.startswith("gsk_") or len(groq_key) < 20 or is_placeholder(groq_key):
+        raise RuntimeError("GROQ_API_KEY has an invalid local format")
+
+    fallback_key = (settings.FALLBACK_GROQ_API_KEY or "").strip()
+    if fallback_key:
+        if not fallback_key.startswith("gsk_") or len(fallback_key) < 20 or is_placeholder(fallback_key):
+            raise RuntimeError("FALLBACK_GROQ_API_KEY has an invalid local format")
+        if hmac.compare_digest(groq_key, fallback_key):
+            raise RuntimeError("FALLBACK_GROQ_API_KEY must differ from GROQ_API_KEY")
+
+    if settings.QDRANT_URL:
+        qdrant_url = urlsplit(settings.QDRANT_URL)
+        if qdrant_url.scheme not in {"http", "https"} or not qdrant_url.hostname:
+            raise RuntimeError("QDRANT_URL must be an HTTP(S) URL with a host")
+        if is_placeholder(settings.QDRANT_URL):
+            raise RuntimeError("QDRANT_URL must be configured with a real host")
+    if settings.QDRANT_API_KEY:
+        qdrant_key = settings.QDRANT_API_KEY.strip()
+        if len(qdrant_key) < 20 or is_placeholder(qdrant_key):
+            raise RuntimeError("QDRANT_API_KEY has an invalid local format")
+
     secret = settings.SESSION_HMAC_SECRET.encode("utf-8")
     if len(secret) < 32:
         raise RuntimeError("SESSION_HMAC_SECRET must be at least 32 bytes")

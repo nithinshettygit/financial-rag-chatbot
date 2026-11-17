@@ -50,6 +50,14 @@ redis.call('ZREM', KEYS[2], ARGV[1])
 return 1
 """
 
+RENEW_SCRIPT = """
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
+    redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+    return 1
+end
+return 0
+"""
+
 
 @dataclass(frozen=True)
 class QueueLease:
@@ -65,47 +73,55 @@ class DistributedRAGQueue:
         member = uuid.uuid4().hex
         deadline = time.monotonic() + settings.RAG_QUEUE_MAX_WAIT_SECONDS
 
-        while True:
-            now_ms = int(time.time() * 1000)
-            try:
-                result = await asyncio.to_thread(
-                    get_redis_client().eval,
-                    QUEUE_ACQUIRE_SCRIPT,
-                    2,
-                    self.queue_key,
-                    self.active_key,
-                    member,
-                    now_ms,
-                    settings.RAG_QUEUE_MAX_WAIT_SECONDS * 1000,
-                    settings.RAG_CONCURRENCY_LEASE_SECONDS * 1000,
-                    settings.MAX_CONCURRENT_RAG,
-                    settings.MAX_QUEUE_WAITERS,
-                )
-            except RedisError as error:
-                logger.error("RAG queue unavailable: %s", error)
-                raise HTTPException(
-                    status_code=503,
-                    detail="RAG concurrency control is temporarily unavailable",
-                ) from error
+        try:
+            while True:
+                now_ms = int(time.time() * 1000)
+                try:
+                    result = await asyncio.to_thread(
+                        get_redis_client().eval,
+                        QUEUE_ACQUIRE_SCRIPT,
+                        2,
+                        self.queue_key,
+                        self.active_key,
+                        member,
+                        now_ms,
+                        settings.RAG_QUEUE_MAX_WAIT_SECONDS * 1000,
+                        settings.RAG_CONCURRENCY_LEASE_SECONDS * 1000,
+                        settings.MAX_CONCURRENT_RAG,
+                        settings.MAX_QUEUE_WAITERS,
+                    )
+                except RedisError as error:
+                    logger.error("RAG queue unavailable: %s", type(error).__name__)
+                    raise HTTPException(
+                        status_code=503,
+                        detail="RAG concurrency control is temporarily unavailable",
+                    ) from error
 
-            result = int(result)
-            if result == 1:
-                return QueueLease(member=member)
-            if result == -1:
-                raise HTTPException(
-                    status_code=429,
-                    detail="RAG queue is full. Please retry shortly.",
-                    headers={"Retry-After": str(settings.RAG_QUEUE_RETRY_AFTER_SECONDS)},
-                )
+                result = int(result)
+                if result == 1:
+                    return QueueLease(member=member)
+                if result == -1:
+                    raise HTTPException(
+                        status_code=429,
+                        detail="RAG queue is full. Please retry shortly.",
+                        headers={"Retry-After": str(settings.RAG_QUEUE_RETRY_AFTER_SECONDS)},
+                    )
 
-            if time.monotonic() >= deadline:
-                raise HTTPException(
-                    status_code=429,
-                    detail="RAG queue wait time exceeded. Please retry shortly.",
-                    headers={"Retry-After": str(settings.RAG_QUEUE_RETRY_AFTER_SECONDS)},
-                )
+                if time.monotonic() >= deadline:
+                    raise HTTPException(
+                        status_code=429,
+                        detail="RAG queue wait time exceeded. Please retry shortly.",
+                        headers={"Retry-After": str(settings.RAG_QUEUE_RETRY_AFTER_SECONDS)},
+                    )
 
-            await asyncio.sleep(settings.RAG_QUEUE_POLL_INTERVAL_SECONDS)
+                await asyncio.sleep(settings.RAG_QUEUE_POLL_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            await self.release(QueueLease(member=member))
+            raise
+        except HTTPException as error:
+            if error.status_code == 429:
+                await self.release(QueueLease(member=member))
+            raise
 
     async def release(self, lease: QueueLease) -> None:
         try:
@@ -121,6 +137,20 @@ class DistributedRAGQueue:
             # The lease has a TTL-like expiry encoded in the active ZSET score,
             # so Redis failure during release cannot permanently consume a slot.
             logger.exception("Failed to release RAG queue lease %s", lease.member)
+
+    async def renew(self, lease: QueueLease) -> None:
+        try:
+            now_ms = int(time.time() * 1000)
+            await asyncio.to_thread(
+                get_redis_client().eval,
+                RENEW_SCRIPT,
+                1,
+                self.active_key,
+                lease.member,
+                now_ms + settings.RAG_CONCURRENCY_LEASE_SECONDS * 1000,
+            )
+        except RedisError as error:
+            logger.error("Failed to renew RAG queue lease: %s", type(error).__name__)
 
 
 rag_queue = DistributedRAGQueue()

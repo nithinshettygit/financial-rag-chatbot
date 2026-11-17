@@ -1,20 +1,28 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    role: str = Field(..., description="'user' or 'assistant'")
-    content: str
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("content")
+    @classmethod
+    def strip_content(cls, content: str) -> str:
+        content = content.strip()
+        if not content:
+            raise ValueError("Conversation content must not be blank")
+        return content
 
 
 class SessionState(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    company: Optional[str] = None
-    fiscal_year: Optional[str] = None
-    target_metric: Optional[str] = None
-    document_id: Optional[str] = None
+    company: Optional[str] = Field(default=None, max_length=200)
+    fiscal_year: Optional[str] = Field(default=None, max_length=20)
+    target_metric: Optional[str] = Field(default=None, max_length=200)
+    document_id: Optional[str] = Field(default=None, max_length=200)
 
 
 class ChatRequest(BaseModel):
@@ -26,8 +34,20 @@ class ChatRequest(BaseModel):
     # exclude=True keeps it out of response serialization and the client payload.
     session_id: Optional[str] = Field(default=None, exclude=True)
     query: str = Field(..., min_length=1, max_length=2000)
-    history: Optional[List[ChatTurn]] = Field(default=None, description="Past conversation turns")
+    history: Optional[List[ChatTurn]] = Field(
+        default=None,
+        max_length=12,
+        description="At most 12 recent conversation messages",
+    )
     state: Optional[SessionState] = Field(default_factory=SessionState)
+
+    @field_validator("query")
+    @classmethod
+    def strip_query(cls, query: str) -> str:
+        query = query.strip()
+        if not query:
+            raise ValueError("Query must not be blank")
+        return query
 
 
 class ContextChunk(BaseModel):

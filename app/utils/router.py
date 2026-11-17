@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.schemas import ChatTurn, SessionState
-from app.utils.llm import chat_with_retry, get_groq_clients
+from app.utils.llm import chat_with_retry, extract_completion_text, get_groq_clients
 from app.utils.logger import logger
 from app.utils.tokens import count_tokens, log_token_usage
 
@@ -40,6 +40,42 @@ _REF_RE = re.compile(
     r"\b(?:it|its|that|this|those|these|them|they|their|he|she)\b|^\s*(?:and|also|what about|how about|same for)\b",
     re.I,
 )
+
+
+def validate_router_response(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    for key in ("intent", "followup_type", "search_query"):
+        if key in data and (not isinstance(data[key], str) or len(data[key]) > 2000):
+            return {}
+    for key in ("entities", "metrics", "aspects"):
+        value = data.get(key, [])
+        if (
+            not isinstance(value, list)
+            or len(value) > 20
+            or any(not isinstance(item, str) or len(item) > 300 for item in value)
+        ):
+            return {}
+    years = data.get("fiscal_years", [])
+    if (
+        not isinstance(years, list)
+        or len(years) > 20
+        or any(type(year) is not int and (not isinstance(year, str) or len(year) > 20) for year in years)
+    ):
+        return {}
+    state = data.get("state", {})
+    state_limits = {"company": 200, "fiscal_year": 20, "target_metric": 200, "document_id": 200}
+    if state is not None and (
+        not isinstance(state, dict)
+        or any(key not in state_limits for key in state)
+        or any(
+            value is not None
+            and (not isinstance(value, str) or len(value) > state_limits[key])
+            for key, value in state.items()
+        )
+    ):
+        return {}
+    return data
 
 
 class QueryFilters(BaseModel):
@@ -218,13 +254,20 @@ Return ONLY JSON:
             router_span.set_attribute("total_tokens", estimated_input)
             router_span.set_attribute("llm_calls", 1)
             router_span.set_attribute("token_count_source", "estimate")
-            logger.error(f"Router LLM failed: {e}")
+            logger.error("Router LLM failed: %s", type(e).__name__)
             return {}
-        response_text = resp.choices[0].message.content or ""
+        try:
+            response_text = extract_completion_text(resp)
+        except ValueError as e:
+            logger.error("Router LLM returned a malformed completion: %s", type(e).__name__)
+            return {}
         log_token_usage(router_span, resp, estimated_input, count_tokens(response_text))
         try:
             data = json.loads(response_text)
-            return data if isinstance(data, dict) else {}
+            validated = validate_router_response(data)
+            if not validated:
+                logger.error("Router LLM returned an invalid response shape")
+            return validated
         except (TypeError, ValueError) as e:
             logger.error(f"Router LLM returned invalid JSON: {e}")
             return {}

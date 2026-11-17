@@ -19,7 +19,7 @@ import threading
 import time
 from typing import Any, Optional, Tuple
 
-from groq import APIConnectionError, Groq, InternalServerError, RateLimitError
+from groq import APIConnectionError, AuthenticationError, Groq, InternalServerError, RateLimitError
 
 from app.config import settings
 
@@ -30,6 +30,17 @@ _PART_RE = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)", re.I)
 _UNIT_S = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
 _CLIENTS_LOCK = threading.Lock()
 _CLIENTS_BY_TIMEOUT: dict[float, Tuple[Groq, ...]] = {}
+
+
+def extract_completion_text(response: Any) -> str:
+    """Return non-empty assistant text or fail explicitly on malformed completions."""
+    try:
+        content = response.choices[0].message.content
+    except (AttributeError, IndexError, TypeError) as error:
+        raise ValueError("Groq returned a malformed completion") from error
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Groq returned an empty completion")
+    return content.strip()
 
 
 def get_groq_clients(timeout: float = 30.0) -> Tuple[Groq, ...]:
@@ -76,10 +87,28 @@ def chat_with_retry(client: Any, *, max_total_wait_s: Optional[float] = None, **
     waited = 0.0
     client_index = 0
     rate_limited_clients = set()
+    invalid_response_clients = set()
     for attempt in range(1, max_attempts + 1):
         try:
-            return clients[client_index].chat.completions.create(**kwargs)
-        except (RateLimitError, APIConnectionError, InternalServerError) as exc:
+            response = clients[client_index].chat.completions.create(**kwargs)
+            try:
+                extract_completion_text(response)
+            except ValueError:
+                logger.warning("Groq returned an empty or malformed completion")
+                invalid_response_clients.add(client_index)
+                next_index = next(
+                    (i for i in range(len(clients)) if i not in invalid_response_clients),
+                    None,
+                )
+                if attempt == max_attempts:
+                    raise
+                if next_index is not None:
+                    client_index = next_index
+                else:
+                    invalid_response_clients.clear()
+                continue
+            return response
+        except (RateLimitError, AuthenticationError, APIConnectionError, InternalServerError) as exc:
             if isinstance(exc, RateLimitError):
                 rate_limited_clients.add(client_index)
                 next_index = next(
@@ -90,6 +119,19 @@ def chat_with_retry(client: Any, *, max_total_wait_s: Optional[float] = None, **
                     client_index = next_index
                     continue
                 rate_limited_clients.clear()
+            elif isinstance(exc, AuthenticationError):
+                next_index = next((i for i in range(len(clients)) if i != client_index), None)
+                if next_index is not None and attempt < max_attempts:
+                    logger.warning("Groq request failed; switching to another configured API key")
+                    client_index = next_index
+                    continue
+                raise
+            elif isinstance(exc, APIConnectionError):
+                next_index = next((i for i in range(len(clients)) if i != client_index), None)
+                if next_index is not None and attempt < max_attempts:
+                    logger.warning("Groq connection failed; switching to another configured API key")
+                    client_index = next_index
+                    continue
 
             hint = parse_retry_after(exc) if isinstance(exc, RateLimitError) else None
             delay = (hint if hint is not None else min(2 ** attempt, 15)) + 0.5 + random.random() * 0.5

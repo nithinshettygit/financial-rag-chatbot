@@ -13,7 +13,7 @@ from app.utils.bm25 import BM25Retriever
 from app.utils.flashrank_reranker import FlashRankReranker
 from app.utils.router import QueryFilters, SubQuery, company_key
 from app.utils.tokens import count_tokens
-from app.utils.vector import QdrantVectorRetriever
+from app.utils.vector import QdrantVectorRetriever, VectorStoreError
 
 
 RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "30"))
@@ -91,6 +91,8 @@ async def get_catalog(force: bool = False) -> List[Dict[str, Any]]:
                     manifest_docs[key]["chunk_count"] += 1
                 docs = list(manifest_docs.values())
             _catalog.update(ts=time.time(), docs=docs)
+        except VectorStoreError:
+            raise
         except Exception:
             logfire.exception("Catalog refresh failed; using stale copy")
             _catalog["ts"] = time.time()
@@ -117,6 +119,8 @@ def resolve_document_ids(entity: Optional[str], document_id: Optional[str], cata
 async def _safe_call(fn: Callable, *args) -> List[Dict[str, Any]]:
     try:
         return await asyncio.to_thread(fn, *args) or []
+    except VectorStoreError:
+        raise
     except Exception:
         logfire.exception("Retriever failed")
         return []
@@ -129,18 +133,28 @@ def _uid(item: Dict[str, Any]) -> str:
 async def _search_target(text: str, filters: QueryFilters, top_k: int) -> List[List[Dict[str, Any]]]:
     vec, bm = get_vector(), get_bm25()
     async with _semaphore():
-        v, b = await asyncio.gather(
+        rankings = await asyncio.gather(
             _safe_call(vec.retrieve, text, top_k, filters),
             _safe_call(bm.retrieve, text, top_k, filters),
+            return_exceptions=True,
         )
+        failure = next((result for result in rankings if isinstance(result, BaseException)), None)
+        if failure:
+            raise failure
+        v, b = rankings
         rankings = [v, b]
         distinct = len({_uid(x) for x in v + b})
         if distinct < MIN_STRICT_YIELD and (filters.years or filters.company):
             soft = QueryFilters(document_ids=filters.document_ids)
-            v2, b2 = await asyncio.gather(
+            relaxed_rankings = await asyncio.gather(
                 _safe_call(vec.retrieve, text, top_k, soft),
                 _safe_call(bm.retrieve, text, top_k, soft),
+                return_exceptions=True,
             )
+            failure = next((result for result in relaxed_rankings if isinstance(result, BaseException)), None)
+            if failure:
+                raise failure
+            v2, b2 = relaxed_rankings
             rankings += [v2, b2]
     return rankings
 
@@ -154,7 +168,10 @@ async def hybrid_search_balanced(
     per_entity_k = max(total // n_entities, MIN_STRICT_YIELD)
 
     tasks = [_search_target(sq.text, entity_filters[sq.entity], per_entity_k) for sq in sub_queries]
-    all_rankings = await asyncio.gather(*tasks)
+    all_rankings = await asyncio.gather(*tasks, return_exceptions=True)
+    failure = next((result for result in all_rankings if isinstance(result, BaseException)), None)
+    if failure:
+        raise failure
 
     fused: Dict[Optional[str], Dict[str, Dict[str, Any]]] = {e: {} for e in entity_filters}
     for sq_idx, (sq, rankings) in enumerate(zip(sub_queries, all_rankings)):
