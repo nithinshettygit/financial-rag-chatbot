@@ -82,10 +82,6 @@ function BotIcon() {
   )
 }
 
-function newSessionId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `session_${Date.now()}`
-}
-
 function isChatResponse(value: unknown): value is ChatResponse {
   if (typeof value !== 'object' || value === null) return false
   const response = value as Record<string, unknown>
@@ -131,9 +127,14 @@ async function responseMessage(response: Response): Promise<string> {
     if (typeof detail === 'string') {
       if (response.status === 503) return 'The service is warming up. Try again in a moment.'
       if (response.status === 504) return 'The request took too long. Please try again.'
-      if (response.status === 429) return 'The service is busy. Please wait a moment and try again.'
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After')
+        return retryAfter
+          ? `The service is busy. Please wait ${retryAfter} seconds and try again.`
+          : detail
+      }
       if (response.status === 401 || response.status === 403) {
-        return 'This session is not authorized to use the service.'
+        return 'Your browser session is not authorized to use the service.'
       }
       return detail
     }
@@ -144,10 +145,8 @@ async function responseMessage(response: Response): Promise<string> {
 
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [sessionId, setSessionId] = useState(newSessionId)
   const [sessionState, setSessionState] = useState<SessionState>(EMPTY_STATE)
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking')
-  const [apiKey, setApiKey] = useState('')
   const [input, setInput] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState('')
@@ -215,7 +214,6 @@ function App() {
   const startNewChat = () => {
     conversationRef.current?.scrollTo({ top: 0 })
     setMessages([])
-    setSessionId(newSessionId())
     setSessionState(EMPTY_STATE)
     setInput('')
     setError('')
@@ -228,7 +226,7 @@ function App() {
 
   const sendMessage = async (query: string, history: ChatTurn[], addUserMessage: boolean) => {
     const normalizedQuery = query.trim()
-    if (!normalizedQuery || !apiKey.trim() || normalizedQuery.length > 2000 || isSending) return
+    if (!normalizedQuery || normalizedQuery.length > 2000 || isSending) return
 
     if (addUserMessage) {
       setMessages((current) => [...current, { role: 'user', content: normalizedQuery }])
@@ -240,12 +238,11 @@ function App() {
     try {
       const response = await fetch(apiUrl('/v1/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': apiKey.trim(),
         },
         body: JSON.stringify({
-          session_id: sessionId,
           query: normalizedQuery,
           history,
           state: sessionState,
@@ -287,7 +284,7 @@ function App() {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const query = input.trim()
-    if (!query || !apiKey.trim() || apiStatus !== 'ready' || isSending) return
+    if (!query || apiStatus !== 'ready' || isSending) return
 
     const history = messages.map(({ role, content }) => ({ role, content }))
     setInput('')
@@ -342,19 +339,6 @@ function App() {
           <span className="plus-mark" aria-hidden="true">+</span>
           New chat
         </button>
-        <div className="api-key-panel">
-          <label htmlFor="api-key-input">API key</label>
-          <input
-            id="api-key-input"
-            type="password"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder="Paste your client key"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <p>Your key stays in this tab and is sent only over HTTPS.</p>
-        </div>
       </aside>
 
       <button
@@ -422,7 +406,7 @@ function App() {
             ) : (
               <div className="message-list">
                 {messages.map((message, index) => (
-                  <article className={`message message-${message.role}`} key={`${sessionId}-${index}`}>
+                  <article className={`message message-${message.role}`} key={`${message.role}-${index}`}>
                     {message.role === 'assistant' && (
                       <div className="assistant-mark"><BotIcon /></div>
                     )}
@@ -489,7 +473,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => void sendMessage(retryRequest.query, retryRequest.history, false)}
-                    disabled={isSending || !apiKey.trim()}
+                    disabled={isSending}
                   >
                     Retry
                   </button>
@@ -516,7 +500,7 @@ function App() {
                     className="send-button"
                     type="submit"
                     aria-label="Send question"
-                    disabled={!input.trim() || !apiKey.trim() || apiStatus !== 'ready' || isSending}
+                    disabled={!input.trim() || apiStatus !== 'ready' || isSending}
                   >
                     <svg viewBox="0 0 20 20" aria-hidden="true">
                       <path d="M3.5 10h12M10 4.5l5.5 5.5-5.5 5.5" />
@@ -526,9 +510,7 @@ function App() {
               </div>
             </form>
             <p className="disclaimer">
-              {apiKey.trim()
-                ? 'Check key figures against the source.'
-                : 'Add your API key in the sidebar to start chatting.'}
+              Check key figures against the source.
             </p>
           </div>
         </section>

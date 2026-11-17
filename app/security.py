@@ -1,85 +1,132 @@
 import asyncio
 import hashlib
 import hmac
+import ipaddress
+import secrets
 import time
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Response, Security
-from fastapi.security import APIKeyHeader
+from fastapi import Depends, HTTPException, Request, Response
 from redis.exceptions import RedisError
 
 from app.config import settings
 from app.utils.cache import get_redis_client
 from app.utils.logger import logger
 
-API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+SESSION_COOKIE = "financial_rag_sid"
+
 RATE_LIMIT_SCRIPT = """
-local count = redis.call('INCR', KEYS[1])
-if count == 1 then
-    redis.call('EXPIRE', KEYS[1], ARGV[1])
+local session_count = tonumber(redis.call('GET', KEYS[1]) or '0')
+local ip_count = tonumber(redis.call('GET', KEYS[2]) or '0')
+local session_limit = tonumber(ARGV[1])
+local ip_limit = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+
+if session_count >= session_limit or ip_count >= ip_limit then
+    return {session_count, ip_count, 0}
 end
-return count
+
+session_count = redis.call('INCR', KEYS[1])
+if session_count == 1 then
+    redis.call('EXPIRE', KEYS[1], ttl)
+end
+
+ip_count = redis.call('INCR', KEYS[2])
+if ip_count == 1 then
+    redis.call('EXPIRE', KEYS[2], ttl)
+end
+
+return {session_count, ip_count, 1}
 """
 
 
-def validate_security_settings() -> None:
-    if not settings.CHAT_API_KEYS:
-        raise RuntimeError("CHAT_API_KEYS must contain at least one API key")
-    if any(not client_name.strip() for client_name in settings.CHAT_API_KEYS):
-        raise RuntimeError("CHAT_API_KEYS client names must not be empty")
-    if any(len(api_key.encode("utf-8")) < 32 for api_key in settings.CHAT_API_KEYS.values()):
-        raise RuntimeError("Every CHAT_API_KEYS value must be at least 32 bytes")
+def _sign_session_id(session_id: str) -> str:
+    digest = hmac.new(
+        settings.SESSION_HMAC_SECRET.encode("utf-8"),
+        session_id.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return digest
 
 
-def authenticate_api_key(api_key: str | None, configured_keys: dict[str, str]) -> str:
-    if not configured_keys:
-        raise HTTPException(status_code=503, detail="Chat authentication is not configured")
-    if not api_key:
-        raise HTTPException(
-            status_code=401,
-            detail="A valid API key is required",
-            headers={"WWW-Authenticate": "ApiKey"},
-        )
-
-    matched = False
-    for configured_key in configured_keys.values():
-        matched = hmac.compare_digest(
-            api_key.encode("utf-8"),
-            configured_key.encode("utf-8"),
-        ) or matched
-    if not matched:
-        raise HTTPException(
-            status_code=401,
-            detail="A valid API key is required",
-            headers={"WWW-Authenticate": "ApiKey"},
-        )
-
-    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+def create_session_token() -> str:
+    session_id = secrets.token_urlsafe(32)
+    return f"{session_id}.{_sign_session_id(session_id)}"
 
 
-def require_chat_api_key(
-    api_key: Annotated[str | None, Security(API_KEY_HEADER)],
-) -> str:
-    return authenticate_api_key(api_key, settings.CHAT_API_KEYS)
+def verify_session_token(token: str | None) -> str | None:
+    if not token or "." not in token:
+        return None
+    session_id, signature = token.rsplit(".", 1)
+    if not session_id or not signature:
+        return None
+    expected = _sign_session_id(session_id)
+    if not hmac.compare_digest(signature, expected):
+        return None
+    return session_id
 
 
-async def enforce_chat_rate_limit(
-    response: Response,
-    key_digest: Annotated[str, Depends(require_chat_api_key)],
-) -> None:
+def ensure_session(request: Request, response: Response) -> str:
+    existing = verify_session_token(request.cookies.get(SESSION_COOKIE))
+    if existing:
+        request.state.session_id = existing
+        return existing
+
+    token = create_session_token()
+    session_id = token.split(".", 1)[0]
+    request.state.session_id = session_id
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        max_age=settings.SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=settings.SESSION_COOKIE_SECURE,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        path="/",
+    )
+    return session_id
+
+
+def normalize_client_ip(request: Request) -> str:
+    # Nginx is configured to overwrite X-Forwarded-For with the immediate client
+    # address. This avoids trusting arbitrary client-supplied forwarding headers.
+    raw_ip = request.headers.get("X-Real-IP") or request.client.host
+    try:
+        ip = ipaddress.ip_address(raw_ip.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid client IP address")
+
+    if ip.version == 6:
+        network = ipaddress.ip_network(f"{ip}/64", strict=False)
+        return str(network.network_address) + "/64"
+    return str(ip)
+
+
+async def enforce_chat_rate_limit(request: Request, response: Response) -> None:
+    session_id = getattr(request.state, "session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Invalid chat session")
+
+    client_ip = normalize_client_ip(request)
     now = int(time.time())
-    window_seconds = settings.CHAT_RATE_LIMIT_WINDOW_SECONDS
-    window = now // window_seconds
-    reset_at = (window + 1) * window_seconds
+    window = now // settings.CHAT_RATE_LIMIT_WINDOW_SECONDS
+    reset_at = (window + 1) * settings.CHAT_RATE_LIMIT_WINDOW_SECONDS
     retry_after = max(1, reset_at - now)
-    redis_key = f"financial-rag:chat-rate:v1:{key_digest}:{window}"
+
+    session_digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    ip_digest = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()
+    session_key = f"financial-rag:rate:v2:session:{session_digest}:{window}"
+    ip_key = f"financial-rag:rate:v2:ip:{ip_digest}:{window}"
 
     try:
-        count = await asyncio.to_thread(
+        result = await asyncio.to_thread(
             get_redis_client().eval,
             RATE_LIMIT_SCRIPT,
-            1,
-            redis_key,
+            2,
+            session_key,
+            ip_key,
+            settings.CHAT_SESSION_RATE_LIMIT_REQUESTS,
+            settings.CHAT_IP_RATE_LIMIT_REQUESTS,
             retry_after,
         )
     except RedisError as error:
@@ -89,15 +136,28 @@ async def enforce_chat_rate_limit(
             detail="Chat rate limiting is temporarily unavailable",
         ) from error
 
-    limit = settings.CHAT_RATE_LIMIT_REQUESTS
-    remaining = max(0, limit - int(count))
-    headers = {
-        "X-RateLimit-Limit": str(limit),
-        "X-RateLimit-Remaining": str(remaining),
-        "X-RateLimit-Reset": str(reset_at),
-    }
-    if int(count) > limit:
-        headers["Retry-After"] = str(retry_after)
-        raise HTTPException(status_code=429, detail="Rate limit exceeded", headers=headers)
+    session_count, ip_count, allowed = map(int, result)
+    session_remaining = max(0, settings.CHAT_SESSION_RATE_LIMIT_REQUESTS - session_count)
+    ip_remaining = max(0, settings.CHAT_IP_RATE_LIMIT_REQUESTS - ip_count)
 
-    response.headers.update(headers)
+    response.headers["X-RateLimit-Session-Limit"] = str(settings.CHAT_SESSION_RATE_LIMIT_REQUESTS)
+    response.headers["X-RateLimit-Session-Remaining"] = str(session_remaining)
+    response.headers["X-RateLimit-IP-Limit"] = str(settings.CHAT_IP_RATE_LIMIT_REQUESTS)
+    response.headers["X-RateLimit-IP-Remaining"] = str(ip_remaining)
+    response.headers["X-RateLimit-Reset"] = str(reset_at)
+
+    if not allowed:
+        response.headers["Retry-After"] = str(retry_after)
+        detail = "Session rate limit exceeded" if session_count >= settings.CHAT_SESSION_RATE_LIMIT_REQUESTS else "IP rate limit exceeded"
+        raise HTTPException(status_code=429, detail=detail, headers={"Retry-After": str(retry_after)})
+
+
+def validate_security_settings() -> None:
+    secret = settings.SESSION_HMAC_SECRET.encode("utf-8")
+    if len(secret) < 32:
+        raise RuntimeError("SESSION_HMAC_SECRET must be at least 32 bytes")
+
+    if settings.SESSION_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+        raise RuntimeError("SESSION_COOKIE_SAMESITE must be lax, strict, or none")
+    if settings.SESSION_COOKIE_SAMESITE == "none" and not settings.SESSION_COOKIE_SECURE:
+        raise RuntimeError("Secure cookies are required when SameSite=None")

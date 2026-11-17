@@ -18,7 +18,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
 COLLECTION_NAME = "financial_rag_analytics"
-VECTOR_NAME = "fastembed-BAAI-bge-small-en-v1.5"
+VECTOR_NAME = "fastembed-BAAI-bge-small-en-v1-5"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_QDRANT_PATH = str(BASE_DIR / "data" / "qdrant_storage")
