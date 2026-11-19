@@ -1,2 +1,0 @@
-# Generated from requirements-eval.in with pip-compile under Python 3.12.
-# Do not edit by hand; regenerate with the documented lock command.

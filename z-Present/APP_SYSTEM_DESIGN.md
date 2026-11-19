@@ -37,8 +37,9 @@ explicitly in [Current implementation caveats](#16-current-implementation-caveat
 
 The system has four broad runtime concerns:
 
-1. **Request boundary:** validate typed chat input, enforce service readiness
-   and a server-side deadline, and serialize a typed response.
+1. **Request boundary:** establish the signed browser session, apply
+   distributed chat-rate limits, validate typed chat input, enforce readiness,
+   queue capacity, and a server-side deadline, then serialize a typed response.
 2. **Policy and query understanding:** detect high-confidence fast paths,
    mask PII/secrets, reject unsafe/out-of-scope messages, resolve follow-ups,
    and produce company/year/metric-specific search tasks.
@@ -54,10 +55,13 @@ The system has four broad runtime concerns:
 ```mermaid
 flowchart TD
     CLIENT[React web client<br/>web/ or API caller] -->|POST /v1/chat| API[FastAPI<br/>app/main.py]
-    API --> VALIDATE[Pydantic validation<br/>ChatRequest]
+    API --> SESSION[Signed browser session<br/>and Redis rate limits]
+    SESSION --> VALIDATE[Pydantic validation<br/>ChatRequest]
     VALIDATE --> READY{ready?}
     READY -->|No| SERVICE503[HTTP 503]
-    READY -->|Yes| PIPE[run_rag_pipeline_async]
+    READY -->|Yes| QUEUE[Redis distributed RAG queue]
+    QUEUE -->|Full / wait expired| QUEUE429[HTTP 429]
+    QUEUE -->|Lease acquired| PIPE[run_rag_pipeline_async]
 
     PIPE --> SEM[Embedding intent classifier<br/>if available]
     SEM --> FAST{clean high-confidence<br/>smalltalk / out-of-scope?}
@@ -137,20 +141,47 @@ objects and in-memory indexes; workers do not share Python process memory.
 ### External/runtime dependencies
 
 - **Groq:** JSON-mode query router, NeMo policy self-check, and answer
-  generation. Primary and optional fallback API keys are configured through
-  settings.
+  generation. The configured model is `openai/gpt-oss-20b`; the primary and
+  optional fallback credentials are configured through environment variables.
 - **Qdrant:** dense vector collection and document catalog.
-- **FastEmbed / BGE-small:** dense query embeddings and the embedding model
-  used by semantic cache.
+- **FastEmbed / BGE-small:** dense query embeddings. The cache's
+  `HFTextVectorizer` uses the same `BAAI/bge-small-en-v1.5` model; the
+  embedding intent router reuses that cache vectorizer rather than loading a
+  separate classifier model.
 - **Local manifests / rank-bm25:** lexical retrieval index, loaded into memory
   when the BM25 retriever is created.
-- **FlashRank:** local candidate reranking model.
+- **FlashRank / `ms-marco-MiniLM-L-12-v2`:** local candidate reranking model.
 - **Redis / RedisVL:** answer cache, including semantic vector search.
 - **NeMo Guardrails / LangChain Groq:** prompt-policy and output rails.
-- **Presidio / spaCy:** configurable PII entity recognition.
+- **Presidio / spaCy `en_core_web_sm`:** configurable PII entity recognition.
 - **Logfire:** spans, attributes, events, and instrumentation.
-- **FastAPI / Pydantic:** HTTP service and typed API boundary.
-- **React / TypeScript / Vite:** user-facing chat client, built and served separately from the API.
+- **FastAPI / Pydantic / Uvicorn:** HTTP service, typed API boundary, and ASGI
+  server.
+- **Streamlit:** separate admin/ingestion user interface.
+- **PyTorch CPU / Transformers:** supporting ML dependencies; the online chat
+  path's directly configured local model IDs are BGE-small and the FlashRank
+  reranker listed above.
+- **Docling:** PDF parsing/chunking in the separate admin/ingestion workflow,
+  not in the chat request path.
+- **React 19 / TypeScript / Vite:** user-facing chat client, built and served
+  separately from the API.
+- **Docker Compose:** production-prototype service orchestration; the API
+  image uses Python 3.12, the frontend build uses Node 22, and the edge image
+  is Nginx Alpine.
+
+### Model inventory
+
+| Model / provider | Runtime and use |
+|---|---|
+| Groq-hosted `openai/gpt-oss-20b` | Default for `LLM_MODEL` (JSON query planning and answer generation) and `GUARDRAIL_LLM_MODEL` (NeMo policy self-check). The two settings can be configured independently. The `openai/` prefix is part of the Groq model ID; the app uses Groq clients, not the OpenAI API. |
+| `BAAI/bge-small-en-v1.5` | FastEmbed creates query embeddings for Qdrant dense search. RedisVL's `HFTextVectorizer` uses the same model for semantic cache embeddings, and the semantic intent router reuses that cache vectorizer. Embedding dimension is 384. |
+| `ms-marco-MiniLM-L-12-v2` | FlashRank `Ranker` reorders hybrid-search candidates locally; configure with `RERANKER_MODEL`. |
+| spaCy `en_core_web_sm` | Loaded by Presidio for PII entity analysis. If Presidio/spaCy initialization or analysis fails, masking falls back to regex patterns. |
+| Docling parser/chunker | Used by the separate PDF ingestion/admin workflow, not chat-time inference. The app Settings do not specify a Docling model ID. |
+
+The application does not configure a local generative model runtime. LLM
+inference is sent to Groq; the embedding and reranking models run locally in
+the API container and are cached in its model-cache volume.
 
 ### Data ownership and consistency
 
@@ -161,8 +192,8 @@ objects and in-memory indexes; workers do not share Python process memory.
   API process and must index into the same Qdrant collection/deployment used by
   the API.
 - The configured collection is `financial_rag_analytics`; the configured
-  named vector is `fastembed-BAAI/bge-small-en-v1.5`; its expected size is 384
-  with cosine distance.
+  named vector is `fastembed-BAAI-bge-small-en-v1-5`; its expected size is
+  384 with cosine distance.
 - Catalog entries are grouped by `(document_id, source_file)`. A corpus
   fingerprint is then built from sorted document IDs and chunk counts.
 
@@ -174,13 +205,13 @@ objects and in-memory indexes; workers do not share Python process memory.
 
 | Field | Type/validation | Role |
 |---|---|---|
-| `session_id` | Required string | Caller-provided conversation identifier; echoed in the response and used for trace context. |
+| `session_id` | Optional internal string, excluded from client serialization | Populated by the API from the signed HttpOnly cookie; callers do not provide the trusted identity. |
 | `query` | Required string, 1–2000 characters | Current user message. The pipeline strips surrounding whitespace. |
-| `history` | Optional list of `ChatTurn`, default empty list | Prior user/assistant turns supplied by the caller; this service does not persist the conversation itself. |
+| `history` | Optional list of at most 12 `ChatTurn` messages | Prior user/assistant turns supplied by the caller; this service does not persist the conversation itself. |
 | `state` | Optional `SessionState`, defaults to an empty state | Carries company, fiscal year, target metric, and document ID between turns. |
 
-`ChatTurn` has a free-form `role` string and `content` string. The schema does
-not constrain roles to only `user` and `assistant`.
+`ChatTurn.role` is restricted to `user` or `assistant`; content must contain
+1–2,000 non-whitespace characters. Request models reject unknown fields.
 
 `SessionState` fields are optional strings:
 
@@ -213,11 +244,13 @@ or a fallback label such as `"N/A"`.
 |---|---|
 | `GET /health` | Returns `{"status": "healthy"}`. This is a process liveness response; it does not assert model/cache readiness. |
 | `GET /health/ready` | Returns `{"status": "ready"}` only after startup warmup; otherwise HTTP 503. |
-| `POST /v1/chat` | Rejects before readiness with HTTP 503; validates the request; applies `REQUEST_TIMEOUT_S` to queue wait plus pipeline execution; returns a `ChatResponse`, HTTP 504 for server timeout, HTTP 503 for unavailable Qdrant/Redis controls, and HTTP 500 for an unexpected exception. A timed-out RAG task retains its queue lease until it finishes. |
+| `POST /v1/chat` | Establishes/validates the signed browser session, applies Redis-backed session and IP request limits, rejects before readiness with HTTP 503, validates the request, then applies `REQUEST_TIMEOUT_S` to queue wait plus pipeline execution. Returns a `ChatResponse`; may return HTTP 429 for rate/queue limits, HTTP 503 for unavailable readiness/Qdrant/Redis controls, HTTP 504 for the request deadline, or HTTP 500 for an unexpected exception. A timed-out RAG task retains its queue lease until it finishes. |
 
 Pydantic validation failures use FastAPI’s standard request-validation
 response. Explicit `HTTPException`s are re-raised unchanged by the chat
-handler.
+handler. The API sets a signed, random `financial_rag_sid` cookie with
+HttpOnly, Secure-by-default, configurable SameSite, and TTL attributes; it
+does not grant authorization privileges by itself.
 
 ## 6. Startup, readiness, and shutdown
 
@@ -237,19 +270,19 @@ handler.
    - intent-example loading and embedding;
    - Groq clients.
 4. The pipeline forces a catalog refresh after these tasks.
-5. The lifespan then calls `init_financial_cache()` again, also in a worker
-   thread. This is an additional cache initialization call after the cache
-   warmup call.
-6. Only after both warmup and the second cache initialization succeed is
-   `app.state.ready` set true.
-7. Startup errors are logged with a stack trace and re-raised. The API does not
+5. Cache warmup catches/logs initialization errors and permits operation
+   without a warm cache; cache lookup/store errors also degrade to uncached
+   request processing.
+6. After warmups and the forced catalog refresh return, `app.state.ready` is
+   set true.
+7. Other startup errors are logged with a stack trace and re-raised. The API does not
    claim readiness after a required warmup failure.
 
 `warmup_pipeline()` uses `asyncio.gather()` without `return_exceptions=True`.
 An exception from a required warmup therefore prevents startup from finishing.
-Some helpers (notably semantic intent setup and NeMo action internals) catch
-their own initialization errors and degrade; other model/cache initialization
-errors can fail the application startup.
+Some helpers (notably semantic intent setup, NeMo action internals, and cache
+warmup) catch their own initialization errors and degrade; required model
+initialization and catalog-refresh errors can fail the application startup.
 
 ### Request concurrency and blocking work
 
@@ -259,9 +292,95 @@ errors can fail the application startup.
 - Vector and BM25 retrieval are run concurrently per target query.
 - A process-local semaphore limits active search targets to
   `MAX_CONCURRENT_SEARCHES`.
+- A separate Redis-backed distributed FIFO queue limits active RAG requests
+  across API processes. It bounds waiting clients, polls for queue position,
+  leases active slots, renews leases while a timed-out request continues, and
+  releases a lease when that work completes.
 - Answer cache writes are scheduled as background thread tasks so the client
   need not wait for them. The pipeline retains task references until
   completion.
+
+### Request rate limits and overload handling
+
+- `POST /v1/chat` uses an atomic Redis Lua script with fixed, epoch-aligned
+  windows. Both counters must be below their limits for a request to be
+  admitted; admitted requests increment a session counter and an IP counter.
+  Rejected attempts do not increment either counter.
+- Defaults are 20 requests per signed session and 60 requests per client IP
+  per 60 seconds. IPv6 addresses are grouped by `/64`. The Redis key contains
+  a SHA-256 digest of the session or normalized IP rather than the raw value.
+- The proxy supplies the immediate client address in `X-Real-IP`; Nginx
+  overwrites forwarding headers rather than trusting a client-supplied
+  `X-Forwarded-For`.
+- Responses expose `X-RateLimit-Session-Limit`,
+  `X-RateLimit-Session-Remaining`, `X-RateLimit-IP-Limit`,
+  `X-RateLimit-IP-Remaining`, and `X-RateLimit-Reset`. A limit rejection is
+  HTTP 429 with `Retry-After`. Redis failure is fail-closed as HTTP 503.
+- The distributed RAG queue has separate capacity and wait limits. A full
+  queue or expired queue wait returns HTTP 429 with `Retry-After`; failure of
+  Redis queue control returns HTTP 503. Queue time also consumes the overall
+  `REQUEST_TIMEOUT_S` deadline.
+
+## 6.1 Docker Compose deployment and ports
+
+[`compose.yaml`](../compose.yaml) defines four services:
+
+| Service | Container listener / published ports | Role and network exposure |
+|---|---|---|
+| `nginx` | Container TCP 80 and 443; published as host `80:80` and `443:443` | Only service publishing host ports. Redirects HTTP to HTTPS and serves the built React app, API routes, and protected admin proxy. |
+| `api` | Uvicorn `0.0.0.0:8000`; not published on the host | FastAPI chat service. Reachable by Nginx on `proxy_api`; Redis reachable on internal `api_backend`. One Uvicorn worker is configured with proxy headers and 30-second keep-alive. |
+| `redis` | Redis/Redis Stack TCP 6379; not published on the host | Cache, distributed rate-limit counters, and distributed RAG queue. Attached only to internal `api_backend`. |
+| `admin` | Streamlit `0.0.0.0:8501`, base path `/admin`; not published on the host | Ingestion UI. Reachable from Nginx on `proxy_admin`; Nginx Basic Auth protects the route. |
+
+No Qdrant server is started by this Compose file: the API and admin service
+expect the configured external Qdrant URL and credential. Compose mounts the
+local `data/manifests` directory into API and admin containers, and persists
+Redis data, uploaded admin files, and downloaded model files in named volumes.
+Networks separate the public proxy, API proxy, admin proxy, and the internal
+API-to-Redis backend. API/admin containers have resource limits; the API has
+5 GiB memory and 4 CPUs, admin 3 GiB, Redis 768 MiB (Redis maxmemory 512 MiB),
+and Nginx 128 MiB.
+
+Redis enables append-only persistence and uses `volatile-lru` eviction at
+512 MiB. Its password is required through `REDIS_PASSWORD`; the container
+health check authenticates before sending `PING`. Nginx resolves Docker
+service names through Docker's embedded DNS and refreshes the API upstream
+address every 30 seconds. Uvicorn trusts forwarded headers from any peer in
+its container network, so the API should remain un-published and reachable
+only through the trusted proxy/backend networks.
+
+The API container health check calls `/health/ready`; it allows a 20-minute
+model warmup start period. Redis has a `PING` health check. Nginx depends on
+API health and admin startup. The API container uses a non-root user,
+`no-new-privileges`, PID and JSON-log rotation limits, and restart policy
+`unless-stopped`.
+
+### Nginx edge behavior
+
+- Port 80 redirects to HTTPS. TLS listens on 443 with TLS 1.2/1.3, the
+  mounted `fullchain.pem` and `privkey.pem`, HTTP/2, and session-ticket
+  resumption disabled. Certificate files and the admin password file are
+  mounted read-only.
+- Nginx serves the SPA and `/assets/`; `/health`, `/health/ready`, and
+  `/v1/chat` proxy to `api:8000`. The API route accepts POST only, does not
+  retry POSTs, and uses 15-second connect and 145-second send/read timeouts.
+  The current proxy comment expects a 120-second API timeout plus margin;
+  the code default is 80 seconds and Compose supplies 120 seconds by default.
+- Request size is limited to 64 KiB generally and 32 MiB for `/admin/`.
+  Per-client connection count is capped at 20. Admin requests additionally
+  have a 5 requests/second Nginx limit with burst 10 and `nodelay`; `/admin`
+  static assets are excluded from both the request-rate and connection-limit
+  keys.
+- `/admin/` uses HTTP Basic Auth from the mounted `admin.htpasswd` file,
+  forwards WebSocket upgrade headers, disables proxy buffering, and has a
+  300-second read timeout. Streamlit XSRF protection is enabled in its
+  service command.
+- Response headers include `nosniff`, same-origin frame protection, strict
+  referrer policy, and one-year HSTS. Nginx hides its version.
+
+Nginx admin rate limiting is distinct from the FastAPI/Redis limits on
+`/v1/chat`. The chat path has no Nginx request-rate limit; it relies on the
+distributed application limiter and queue.
 
 ### Shutdown
 
@@ -332,10 +451,13 @@ sequenceDiagram
 #### Stage 0 — Boundary, readiness, and deadline
 
 1. Client sends `POST /v1/chat`.
-2. FastAPI/Pydantic validates `ChatRequest`.
-3. If readiness is false, return HTTP 503 with a warmup message.
-4. The endpoint starts a Logfire span and awaits
-   `run_rag_pipeline_async()` under `REQUEST_TIMEOUT_S`, default 40 seconds.
+2. FastAPI establishes or verifies the signed HttpOnly session cookie, then
+   the Redis-backed per-session and per-IP rate limiter runs.
+3. FastAPI/Pydantic validates `ChatRequest`; the endpoint then checks readiness
+   and returns HTTP 503 with a warmup message if the service is not ready.
+4. The endpoint waits for a distributed RAG queue lease, then starts the
+   pipeline under the remaining `REQUEST_TIMEOUT_S` deadline (80 seconds in
+   code; 120 seconds by default in Compose).
 5. An asyncio timeout becomes HTTP 504. Other unhandled exceptions are logged
    and mapped to HTTP 500.
 
@@ -640,7 +762,8 @@ returned state on the next request.
 - reads `FASTEMBED_CACHE_DIR` and `FASTEMBED_LOCAL_FILES_ONLY` environment
   variables for local model behavior;
 - connects to remote Qdrant when `QDRANT_URL` is configured, passing
-  `QDRANT_API_KEY`; otherwise uses `QDRANT_STORAGE_PATH`;
+  `QDRANT_API_KEY`; the no-URL fallback currently references
+  `settings.QDRANT_STORAGE_PATH`, which is not declared in `config.py`;
 - returns empty results when the configured collection does not exist;
 - embeds the query, calls Qdrant `query_points()` with the configured named
   vector and `RETRIEVAL_K` default 30;
@@ -866,7 +989,7 @@ uses the greeting cache.
 
 - defaults to four attempts (`LLM_MAX_ATTEMPTS=4`);
 - defaults to a cumulative retry sleep budget of 10 seconds
-  (`LLM_MAX_WAIT_S=10`);
+  (`LLM_MAX_WAIT_S=10`; Compose defaults this to 25 seconds);
 - retries rate limits, connection errors, and internal server errors;
 - rotates to another configured key after a rate limit, before sleeping;
 - parses Groq’s “try again in …” duration or `Retry-After` header when
@@ -874,6 +997,10 @@ uses the greeting cache.
 - otherwise uses bounded exponential delay plus jitter;
 - optionally passes `LLM_REASONING_EFFORT` for models whose name includes
   `gpt-oss`.
+
+These are client-side retry controls, not a configured Groq RPM/TPM quota.
+Actual provider rate limits depend on the Groq account/model allocation and
+are not set in this repository.
 
 ### Token telemetry
 
@@ -912,22 +1039,21 @@ standard module loggers or Logfire.
 
 ### Query data in traces
 
-The FastAPI request span in `main.py` is created with
-`query=request.query` before the pipeline’s PII masking. That means the raw
-request query can be attached to a trace even though the pipeline subsequently
-masks PII before routing. Operators should account for this when configuring
-trace retention, access, and export.
-
-The pipeline also records safe/masked query text in its root span after regular
-input rails. Smalltalk fast-path traces record their original query after a
-PII-equality check; the regex fallback is restricted to anchored greeting
-phrases.
+The application-authored FastAPI request span records query length and a
+SHA-256 query hash, not the raw query string. The pipeline likewise records
+query hashes for its root span and planning rather than setting raw query text
+as a span attribute. Logfire instrumentation and downstream exporters should
+still be configured with appropriate access and retention controls.
 
 ## 14. Configuration reference
 
 Settings are defined in [`config.py`](../app/config.py), loaded with Pydantic
-Settings and `.env`. Environment variables override the defaults. Additional
-controls are read directly from the environment in `main.py`,
+Settings and `.env` for direct local runs; process environment variables
+override those values. Compose passes a selected subset through service
+environment interpolation. Direct `os.getenv()` reads do not automatically
+inherit values parsed by Pydantic from `.env`; export those variables into the
+process environment or set them in the Compose service environment.
+Additional controls are read directly from the environment in `main.py`,
 `services/retrieval.py`, `cache.py`, `vector.py`, and `llm.py`.
 
 ### 14.1 Core service/model/storage settings
@@ -938,15 +1064,19 @@ controls are read directly from the environment in `main.py`,
 | `GROQ_API_KEY` | Required | Primary Groq credential; settings construction requires it. |
 | `FALLBACK_GROQ_API_KEY` | None | Optional second Groq credential. |
 | `LLM_MODEL` | `openai/gpt-oss-20b` | Router/answer model. |
+| `GUARDRAIL_LLM_MODEL` | `openai/gpt-oss-20b` | Model used by NeMo's LangChain Groq policy checks. |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Query embedding model. |
-| `VECTOR_NAME` | `fastembed-BAAI/bge-small-en-v1.5` | Qdrant named vector. |
+| `VECTOR_NAME` | `fastembed-BAAI-bge-small-en-v1-5` | Qdrant named vector. |
 | `COLLECTION_NAME` | `financial_rag_analytics` | Qdrant collection. |
 | `RERANKER_MODEL` | `ms-marco-MiniLM-L-12-v2` | FlashRank model. |
-| `QDRANT_URL` | None | Select remote Qdrant when set. |
-| `QDRANT_API_KEY` | None | Credential for remote Qdrant. |
-| `QDRANT_STORAGE_PATH` | `data/qdrant_storage` | Local Qdrant directory when remote URL is absent. |
+| `QDRANT_URL` | None in Settings; required by Compose | Select remote Qdrant when set. |
+| `QDRANT_API_KEY` | None in Settings; required by Compose | Credential for remote Qdrant. |
 | `BM25_MANIFEST_PATH` | `data/manifests` | BM25 fallback manifest path. |
 | `LOGFIRE_TOKEN` | None | Enables authenticated remote Logfire sending when truthy. |
+| `SESSION_HMAC_SECRET` | Required; minimum 32 bytes | Signs the browser session cookie; keep its value secret. |
+| `SESSION_TTL_SECONDS` | 86400 | Signed session cookie lifetime. |
+| `SESSION_COOKIE_SECURE` | true | Whether to set Secure on the session cookie. |
+| `SESSION_COOKIE_SAMESITE` | `lax` | Cookie policy; accepted values are `lax`, `strict`, `none`; `none` requires Secure. |
 
 ### 14.2 Retrieval, context, and history
 
@@ -957,42 +1087,57 @@ controls are read directly from the environment in `main.py`,
 | `RRF_K` | 60 | Reciprocal-rank fusion constant. |
 | `MAX_HISTORY_TURNS` | 6 | Router history boundary and helper default; individual paths apply their own smaller slices. |
 | `MAX_CONTEXT_TOKENS` | 4096 | Maximum packed evidence context. |
-| `REQUEST_TIMEOUT_S` | 80 | Total API deadline including queue wait; the queue lease remains active until timed-out work finishes. |
+| `REQUEST_TIMEOUT_S` | 80 in `main.py`; Compose default 120 | Total API deadline including queue wait; the queue lease remains active until timed-out work finishes. |
 | `RERANK_CANDIDATES` | 30 | Retrieval candidate target; direct environment variable. |
-| `FINAL_TOP_K` | 5 | Final result base; direct environment variable takes precedence in the retrieval service. |
 | `MAX_FINAL_TOP_K` | 10 | Cap floor for multi-entity selection; direct environment variable. |
 | `MIN_STRICT_YIELD` | 5 | Minimum distinct strict retrieval yield before relaxing year/company filters; direct environment variable. |
 | `CATALOG_TTL_S` | 300 | Catalog refresh interval; direct environment variable. |
 | `MAX_CONCURRENT_SEARCHES` | 8 | Search semaphore limit; direct environment variable. |
 
-### 14.3 Cache settings
+### 14.3 Chat request limits and RAG queue
+
+These are validated Pydantic settings. Compose defaults differ for the
+distributed queue; Compose interpolation may override these values.
+
+| Setting | Settings default | Compose default | Effect |
+|---|---:|---:|---|
+| `CHAT_SESSION_RATE_LIMIT_REQUESTS` | 20 | 20 | Chat admissions per signed session per fixed window. |
+| `CHAT_IP_RATE_LIMIT_REQUESTS` | 60 | 60 | Chat admissions per normalized client IP per fixed window. |
+| `CHAT_RATE_LIMIT_WINDOW_SECONDS` | 60 | 60 | Fixed rate-limit window duration. |
+| `MAX_CONCURRENT_RAG` | 1 | 2 | Concurrent active RAG request leases across API processes. |
+| `MAX_QUEUE_WAITERS` | 10 | 15 | Maximum waiting RAG requests. |
+| `RAG_QUEUE_MAX_WAIT_SECONDS` | 15 | 45 | Maximum time waiting for a queue slot. |
+| `RAG_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | 0.25 | Redis queue polling interval. |
+| `RAG_QUEUE_RETRY_AFTER_SECONDS` | 2 | 3 | `Retry-After` value on full/expired queue response. |
+| `RAG_CONCURRENCY_LEASE_SECONDS` | 60 | 90 | Distributed active-slot lease duration; renewed while work is running. |
+
+### 14.4 Cache settings
 
 | Setting | Default | Effect |
 |---|---:|---|
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection. |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection for cache, rate limiter, and queue; Compose constructs an authenticated URL for `redis:6379/0` using `REDIS_PASSWORD`. |
 | `CACHE_TTL` | 86400 seconds | Normal response cache TTL. |
 | `CACHE_GREETING_TTL` | 604800 seconds | Greeting cache TTL. |
 | `CACHE_MAX_DISTANCE` | 0.04 | Maximum semantic-cache vector distance. |
 | `CACHE_MIN_TERM_OVERLAP` | 0.7 | Required term Jaccard overlap for semantic hit. |
-| `REDIS_URL` (direct environment read) | Falls back to Settings value | Used by cache Redis client. |
 
-### 14.4 Guardrail and privacy settings
+### 14.5 Guardrail and privacy settings
 
 | Setting | Default | Effect |
 |---|---|---|
 | `GUARDRAILS_ENABLED` | true | Enables NeMo input/output rails. |
 | `GUARDRAILS_PATH` | `app/guardrails_config` | NeMo config directory. |
 | `GUARDRAIL_LLM_MODEL` | `openai/gpt-oss-20b` | NeMo policy model. |
-| `GUARDRAILS_TIMEOUT_S` | 8 seconds | Timeout per NeMo check. |
+| `GUARDRAILS_TIMEOUT_S` | 8 seconds in Settings; Compose default 15 | Timeout per NeMo check. |
 | `GUARDRAILS_FAIL_OPEN` | false | Fail closed on rail failure; true enables deterministic fallback only. |
 | `GUARDRAILS_NUMERIC_CHECK` | true | Enable numeric evidence check. |
-| `PII_ENGINE` | `presidio` | `presidio` or regex-only mode. |
+| `PII_ENGINE` | `presidio` | `presidio` enables Presidio; any other value selects the regex fallback. |
 | `PII_SPACY_MODEL` | `en_core_web_sm` | Presidio NLP model. |
 | `PII_SCORE_THRESHOLD` | 0.4 | Presidio entity threshold. |
 | `PII_INPUT_ENTITIES` | Sensitive entity list in `config.py` | Input masking types. |
 | `PII_OUTPUT_ENTITIES` | Sensitive entity list excluding phone | Output masking types. |
 
-### 14.5 Intent and direct LLM retry settings
+### 14.6 Intent and direct LLM retry settings
 
 | Setting | Default | Effect |
 |---|---|---|
@@ -1001,15 +1146,71 @@ controls are read directly from the environment in `main.py`,
 | `INTENT_MIN_SCORE` | 0.85 | Minimum cosine score for a classifier label. |
 | `INTENT_MIN_MARGIN` | 0.03 | Required lead over second-best label. |
 | `LLM_MAX_ATTEMPTS` | 4 | Groq wrapper attempt count. |
-| `LLM_MAX_WAIT_S` | 10 | Maximum cumulative retry sleep. |
+| `LLM_MAX_WAIT_S` | 10; Compose default 25 | Maximum cumulative retry sleep per wrapped Groq request. |
 | `LLM_REASONING_EFFORT` | unset | Optional `gpt-oss` reasoning setting. |
-| `FASTEMBED_CACHE_DIR` | unset | Optional FastEmbed model cache override. |
+| `FASTEMBED_CACHE_DIR` | No Python default; Docker sets `/home/app/.cache/fastembed` | FastEmbed model cache directory. |
 | `FASTEMBED_LOCAL_FILES_ONLY` | false | FastEmbed local-only mode when set to `true`. |
+| `HF_HOME` | Docker sets `/home/app/.cache/huggingface` | Hugging Face model/cache location. |
+| `EMBEDDING_TIMEOUT_S` | Not read by current app code; Compose passes 40 | No observed effect in the application source. |
+| `RERANK_TIMEOUT_S` | Not read by current app code; Compose passes 30 | No observed effect in the application source. |
+| `WARMUP_STEP_TIMEOUT_S` | Not read by current app code; Compose passes 300 | No observed effect in the application source. |
 
-Some similarly named values exist both as Pydantic settings and direct
-environment reads. For deployment or tuning, inspect both the settings class
-and the module-level environment reads rather than assuming one configuration
-source covers all controls.
+The default input PII entity set includes phone, email, payment card, SSN,
+IBAN, IP address, bank number, passport, driver license, Aadhaar, and PAN.
+Output masking omits phone numbers but covers the other configured sensitive
+financial/identity types. API-key-like patterns are masked independently.
+
+### 14.7 Deployment environment-variable names
+
+This reference lists names and safe defaults/roles only. It intentionally does
+not reproduce secret values from any local or deployment environment file.
+Supply credentials through a secret manager or untracked deployment
+environment; never commit populated secret values.
+
+**Required by Compose:** `GROQ_API_KEY`, `SESSION_HMAC_SECRET`, `QDRANT_URL`,
+`QDRANT_API_KEY`, `REDIS_PASSWORD`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD`.
+`SESSION_HMAC_SECRET` must be at least 32 bytes and should be high entropy.
+Groq and Qdrant credentials receive basic startup format/placeholder
+validation; this does not prove that the remote service accepts them.
+
+**Optional/defaulted by Compose:** `FALLBACK_GROQ_API_KEY`,
+`SESSION_TTL_SECONDS`, `SESSION_COOKIE_SECURE`,
+`SESSION_COOKIE_SAMESITE`, `CHAT_SESSION_RATE_LIMIT_REQUESTS`,
+`CHAT_IP_RATE_LIMIT_REQUESTS`, `CHAT_RATE_LIMIT_WINDOW_SECONDS`,
+`MAX_CONCURRENT_RAG`, `MAX_QUEUE_WAITERS`,
+`RAG_QUEUE_MAX_WAIT_SECONDS`, `RAG_QUEUE_POLL_INTERVAL_SECONDS`,
+`RAG_QUEUE_RETRY_AFTER_SECONDS`, `RAG_CONCURRENCY_LEASE_SECONDS`,
+`COLLECTION_NAME`, `LOGFIRE_TOKEN`, `REQUEST_TIMEOUT_S`,
+`LLM_MAX_WAIT_S`, `EMBEDDING_TIMEOUT_S`, `RERANK_TIMEOUT_S`,
+`WARMUP_STEP_TIMEOUT_S`, `GUARDRAILS_TIMEOUT_S`, `GUARDRAILS_ENABLED`,
+and `GUARDRAILS_FAIL_OPEN`. Compose also sets
+`TOKENIZERS_PARALLELISM=false`, `OMP_NUM_THREADS=4`, and
+`HF_HUB_DISABLE_TELEMETRY=1` in the API container.
+
+Other supported names include `APP_NAME`, `LLM_MODEL`,
+`GUARDRAIL_LLM_MODEL`, `EMBEDDING_MODEL`, `VECTOR_NAME`, `RERANKER_MODEL`,
+`BM25_MANIFEST_PATH`, `RETRIEVAL_K`, `FINAL_TOP_K`, `RRF_K`,
+`MAX_HISTORY_TURNS`, `MAX_CONTEXT_TOKENS`, `REDIS_URL`, `CACHE_TTL`,
+`CACHE_GREETING_TTL`, `CACHE_MAX_DISTANCE`, `CACHE_MIN_TERM_OVERLAP`,
+`GUARDRAILS_PATH`, `GUARDRAILS_NUMERIC_CHECK`, `PII_ENGINE`,
+`PII_SPACY_MODEL`, `PII_SCORE_THRESHOLD`, `PII_INPUT_ENTITIES`,
+`PII_OUTPUT_ENTITIES`, `INTENT_ROUTER_ENABLED`, `INTENT_EXAMPLES_PATH`,
+`INTENT_MIN_SCORE`, `INTENT_MIN_MARGIN`, `LLM_MAX_ATTEMPTS`,
+`LLM_REASONING_EFFORT`, `FASTEMBED_CACHE_DIR`,
+`FASTEMBED_LOCAL_FILES_ONLY`, `RERANK_CANDIDATES`, `MAX_FINAL_TOP_K`,
+`MIN_STRICT_YIELD`, `CATALOG_TTL_S`, and `MAX_CONCURRENT_SEARCHES`.
+
+The web build supports `VITE_API_BASE_URL` (empty means same-origin) and
+`VITE_API_PROXY_TARGET` (development proxy target, default
+`http://127.0.0.1:8000`) in [`web/.env.example`](../web/.env.example).
+Vite-prefixed values are bundled into browser code and must never contain
+secrets.
+
+Several settings are read directly with `os.getenv()` rather than declared
+in Pydantic Settings. Compose also passes `EMBEDDING_TIMEOUT_S`,
+`RERANK_TIMEOUT_S`, and `WARMUP_STEP_TIMEOUT_S`, which current source does not
+consume. Treat source-code reads as authoritative: a passed environment
+variable is not necessarily active.
 
 ## 15. React web client
 
@@ -1017,8 +1218,9 @@ The user-facing client lives under [`web/`](../web/) and consumes the FastAPI
 service rather than implementing retrieval itself.
 
 1. Checks `/health/ready` and reflects service readiness in the interface.
-2. Posts `session_id`, `query`, `history`, and conversational `state` to
-   `/v1/chat`.
+2. Posts `query`, `history`, and conversational `state` to `/v1/chat` with
+   browser credentials included; the server-managed signed cookie supplies
+   session identity.
 3. Renders Markdown answers and exposes retrieved source passages when
    returned by the API.
 4. Keeps chat state in the browser session; conversation history is not
@@ -1053,13 +1255,17 @@ should be considered during maintenance or deployment.
     `check_output()` return immediately when `GUARDRAILS_ENABLED=false`; the
     ordinary query path then does not mask the current input or generated
     answer through these wrappers.
-6. **Raw query is attached to the API Logfire span.** `main.py` records
-    `request.query` at the HTTP boundary before input masking. Trace access and
-    retention therefore matter for user privacy.
-7. **Cache initialization is performed twice during startup.** It is invoked
-    in `warmup_pipeline()` and again in the FastAPI lifespan.
-8. **Shutdown does not close singleton clients.** `shutdown_pipeline()` is
+6. **Logfire instrumentation still needs privacy-aware retention.** The
+    application-authored HTTP and pipeline spans use query hashes rather than
+    recording the raw query as a span attribute; configure trace access and
+    retention appropriately for the deployment.
+7. **Shutdown does not close singleton clients.** `shutdown_pipeline()` is
     empty.
+8. **Local Qdrant path setting is missing.** When `QDRANT_URL` is unset,
+    `QdrantVectorRetriever` reads `settings.QDRANT_STORAGE_PATH`, but that
+    setting is not declared in `config.py`. The Compose deployment avoids this
+    branch by requiring `QDRANT_URL`; local-only Qdrant startup needs this
+    setting added or a configured remote Qdrant URL.
 9. **Retriever exceptions become empty rankings.** This allows one retrieval
     backend to continue when the other fails, but if both fail the request may
     surface as a no-evidence answer rather than a direct retrieval error.
@@ -1085,8 +1291,8 @@ should be considered during maintenance or deployment.
     the answer and chunks are reused, but the original `[S#]` source map is
     not returned. Clients should not assume cached and uncached responses have
     identical `source_map` values.
-17. **History role validation is loose.** `ChatTurn.role` is any string and is
-    later forwarded as a model message role in some code paths.
+17. **History roles are constrained.** `ChatTurn.role` permits only `user` or
+    `assistant`; unknown request fields are rejected.
 18. **The `health` route is liveness only.** Use `/health/ready` to determine
     whether initialized models and required startup resources are available.
 
@@ -1095,6 +1301,9 @@ should be considered during maintenance or deployment.
 | Condition | Current behavior |
 |---|---|
 | Request schema invalid | FastAPI returns request validation error. |
+| Chat session/IP rate limit exceeded | HTTP 429 with `Retry-After` and rate-limit headers. |
+| RAG queue full or wait expired | HTTP 429 with `Retry-After`. |
+| Redis unavailable for rate limiting or queue control | Fail closed with HTTP 503. |
 | Service not ready | `/health/ready` and `/v1/chat` return HTTP 503. |
 | Request exceeds server deadline | HTTP 504; timeout recorded in Logfire. |
 | Unexpected request exception | Logfire exception and HTTP 500 with generic detail. |
@@ -1105,12 +1314,12 @@ should be considered during maintenance or deployment.
 | Strict retrieval has too few results | Retry without year/company filters but retain document IDs. |
 | FlashRank fails | Log; preserve incoming ranking with fallback score. |
 | Cache read/write fails | Log; continue on miss or leave successful response unchanged. |
-| NeMo check errors/times out | Deterministic fail-open fallback by default; temporary block when fail-open disabled. |
+| NeMo check errors/times out | With default `GUARDRAILS_FAIL_OPEN=false`, fail closed with a temporary refusal; when true, run deterministic fallback checks. |
 | Output number check fails once | Retry once with stricter answer prompt. |
 | Output still blocked | Return guardrail refusal; do not cache. |
 | Requested company not in catalog | Return not-found message, or annotate partial answer if other entities remain. |
 | No usable context | Return no-support message; do not generate or cache. |
-| Startup warmup/cache initialization fails | Log/re-raise; app remains unready and startup fails. |
+| Required model warmup or catalog refresh fails | Log/re-raise; app remains unready and startup fails. Cache warmup errors are logged and cache use degrades gracefully. |
 
 ## 18. Operational entry points
 
@@ -1124,17 +1333,18 @@ cd web
 npm run dev
 ```
 
-`python -m app.main` also invokes Uvicorn on `0.0.0.0:8000`. These are
-development/operational entry points, not a complete production deployment
-recipe. Production should separately define network exposure, authentication,
-TLS/reverse proxy, worker count, secrets, Redis/Qdrant availability, model
-cache persistence, and trace policy.
+`python -m app.main` also invokes Uvicorn on `0.0.0.0:8000`. These direct
+commands are development entry points. The repository's Compose deployment is
+the production-prototype topology described in [Docker Compose deployment and
+ports](#61-docker-compose-deployment-and-ports); it still requires correctly
+provisioned secret values, TLS certificates, the Nginx admin password file,
+external Qdrant availability, persistent volumes, and an operational Logfire
+trace-retention policy.
 
 Example request shape:
 
 ```json
 {
-  "session_id": "sess_12345",
   "query": "What was Nike's revenue in 2025?",
   "history": [],
   "state": {
