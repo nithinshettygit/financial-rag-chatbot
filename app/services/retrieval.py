@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -9,24 +8,24 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import logfire
 
 from app.config import settings
-from app.utils.bm25 import BM25Retriever
-from app.utils.flashrank_reranker import FlashRankReranker
+from app.retrieval.bm25 import BM25Retriever
+from app.retrieval.voyage_reranker import VoyageReranker
 from app.utils.router import QueryFilters, SubQuery, company_key
 from app.utils.tokens import count_tokens
-from app.utils.vector import QdrantVectorRetriever
+from app.retrieval.qdrant import QdrantVectorRetriever, VectorStoreError
 
 
-RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "30"))
-FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "5"))
-MAX_FINAL_TOP_K = int(os.getenv("MAX_FINAL_TOP_K", "10"))
-MIN_STRICT_YIELD = int(os.getenv("MIN_STRICT_YIELD", "5"))
-CATALOG_TTL_S = int(os.getenv("CATALOG_TTL_S", "300"))
-MAX_CONCURRENT_SEARCHES = int(os.getenv("MAX_CONCURRENT_SEARCHES", "8"))
+RERANK_CANDIDATES = settings.RERANK_CANDIDATES
+FINAL_TOP_K = settings.FINAL_TOP_K
+MAX_FINAL_TOP_K = settings.MAX_FINAL_TOP_K
+MIN_STRICT_YIELD = settings.MIN_STRICT_YIELD
+CATALOG_TTL_S = settings.CATALOG_TTL_S
+MAX_CONCURRENT_SEARCHES = settings.MAX_CONCURRENT_SEARCHES
 
 _init_lock = threading.Lock()
 _vector: Optional[QdrantVectorRetriever] = None
 _bm25: Optional[BM25Retriever] = None
-_reranker: Optional[FlashRankReranker] = None
+_reranker: Optional[VoyageReranker] = None
 _search_sem: Optional[asyncio.Semaphore] = None
 _catalog: Dict[str, Any] = {"ts": 0.0, "docs": []}
 
@@ -47,11 +46,11 @@ def get_bm25() -> BM25Retriever:
     return _bm25
 
 
-def _get_reranker() -> FlashRankReranker:
+def _get_reranker() -> VoyageReranker:
     global _reranker
     with _init_lock:
         if _reranker is None:
-            _reranker = FlashRankReranker()
+            _reranker = VoyageReranker()
     return _reranker
 
 
@@ -91,6 +90,8 @@ async def get_catalog(force: bool = False) -> List[Dict[str, Any]]:
                     manifest_docs[key]["chunk_count"] += 1
                 docs = list(manifest_docs.values())
             _catalog.update(ts=time.time(), docs=docs)
+        except VectorStoreError:
+            raise
         except Exception:
             logfire.exception("Catalog refresh failed; using stale copy")
             _catalog["ts"] = time.time()
@@ -117,6 +118,8 @@ def resolve_document_ids(entity: Optional[str], document_id: Optional[str], cata
 async def _safe_call(fn: Callable, *args) -> List[Dict[str, Any]]:
     try:
         return await asyncio.to_thread(fn, *args) or []
+    except VectorStoreError:
+        raise
     except Exception:
         logfire.exception("Retriever failed")
         return []
@@ -129,18 +132,28 @@ def _uid(item: Dict[str, Any]) -> str:
 async def _search_target(text: str, filters: QueryFilters, top_k: int) -> List[List[Dict[str, Any]]]:
     vec, bm = get_vector(), get_bm25()
     async with _semaphore():
-        v, b = await asyncio.gather(
+        rankings = await asyncio.gather(
             _safe_call(vec.retrieve, text, top_k, filters),
             _safe_call(bm.retrieve, text, top_k, filters),
+            return_exceptions=True,
         )
+        failure = next((result for result in rankings if isinstance(result, BaseException)), None)
+        if failure:
+            raise failure
+        v, b = rankings
         rankings = [v, b]
         distinct = len({_uid(x) for x in v + b})
         if distinct < MIN_STRICT_YIELD and (filters.years or filters.company):
             soft = QueryFilters(document_ids=filters.document_ids)
-            v2, b2 = await asyncio.gather(
+            relaxed_rankings = await asyncio.gather(
                 _safe_call(vec.retrieve, text, top_k, soft),
                 _safe_call(bm.retrieve, text, top_k, soft),
+                return_exceptions=True,
             )
+            failure = next((result for result in relaxed_rankings if isinstance(result, BaseException)), None)
+            if failure:
+                raise failure
+            v2, b2 = relaxed_rankings
             rankings += [v2, b2]
     return rankings
 
@@ -154,7 +167,10 @@ async def hybrid_search_balanced(
     per_entity_k = max(total // n_entities, MIN_STRICT_YIELD)
 
     tasks = [_search_target(sq.text, entity_filters[sq.entity], per_entity_k) for sq in sub_queries]
-    all_rankings = await asyncio.gather(*tasks)
+    all_rankings = await asyncio.gather(*tasks, return_exceptions=True)
+    failure = next((result for result in all_rankings if isinstance(result, BaseException)), None)
+    if failure:
+        raise failure
 
     fused: Dict[Optional[str], Dict[str, Dict[str, Any]]] = {e: {} for e in entity_filters}
     for sq_idx, (sq, rankings) in enumerate(zip(sub_queries, all_rankings)):

@@ -7,19 +7,17 @@ services:
               --proxy-headers, --forwarded-allow-ips=*, --timeout-keep-alive, "30"]
     environment:
       GROQ_API_KEY: ${GROQ_API_KEY:?Set GROQ_API_KEY}
-      FALLBAFCK_GROQ_API_KEY: ${FALLBACK_GROQ_API_KEY:-}
-      CHAT_API_KEYS: ${CHAT_API_KEYS:?Set CHAT_API_KEYS}
-      CHAT_RATE_LIMIT_REQUESTS: ${CHAT_RATE_LIMIT_REQUESTS:-60}
-      CHAT_RATE_LIMIT_WINDOW_SECONDS: ${CHAT_RATE_LIMIT_WINDOW_SECONDS:-60}
-      # QDRANT_STORAGE_PATH: /app/data/qdrant_storage
+      FALLBACK_GROQ_API_KEY: ${FALLBACK_GROQ_API_KEY:-}
+      SESSION_HMAC_SECRET: ${SESSION_HMAC_SECRET:?Set SESSION_HMAC_SECRET}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:?Set VOYAGE_API_KEY}
+      QDRANT_URL: ${QDRANT_URL:?Set QDRANT_URL}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       LOGFIRE_TOKEN: ${LOGFIRE_TOKEN:-}
-      REQUEST_TIMEOUT_S: "40"
       TOKENIZERS_PARALLELISM: "false"
       OMP_NUM_THREADS: "4"
       HF_HUB_DISABLE_TELEMETRY: "1"
     volumes:
-      # - ./data/qdrant_storage:/app/data/qdrant_storage
       - ./data/manifests:/app/data/manifests
       - model_cache:/home/app/.cache
     depends_on:
@@ -33,10 +31,10 @@ services:
     security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"]
-      interval: 30s
-      timeout: 10s
+      interval: 180s
+      timeout: 15s
       retries: 3
-      start_period: 15m
+      start_period: 20m
     logging: { driver: json-file, options: { max-size: 10m, max-file: "5" } }
 
   redis:
@@ -57,30 +55,26 @@ services:
 
   nginx:
     build: { context: ., target: production }
-    environment:
-      CHAT_API_KEY: ${WEB_API_KEY:?Set WEB_API_KEY}
     ports: ["80:80", "443:443"]
     volumes:
       - ./deploy/certs:/etc/nginx/certs:ro
       - ./deploy/secrets/admin.htpasswd:/etc/nginx/auth/admin.htpasswd:ro
     depends_on:
       api: { condition: service_healthy }
-      admin: { condition: service_started, required: false }
+      admin: { condition: service_started }
     networks: [proxy_api, proxy_admin]
     mem_limit: 128m
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
     logging: { driver: json-file, options: { max-size: 10m, max-file: "5" } }
 
-  # --- server mode only (docker compose --profile server up): needs the api switched to QDRANT_URL ---
   admin:
-    profiles: ["server"]   #profiles: ["admin"]   
     build: { context: ., target: python-runtime }
     command: [streamlit, run, admin/app.py, --server.address=0.0.0.0, --server.port=8501,
               --server.baseUrlPath=admin, --server.enableCORS=false,
               --server.enableXsrfProtection=true, --browser.gatherUsageStats=false]
     environment:
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: ${QDRANT_URL:?Set QDRANT_URL}
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD}
@@ -90,27 +84,16 @@ services:
       - ./data/manifests:/app/data/manifests
       - admin_uploads:/app/data/temp_uploads
       - model_cache:/home/app/.cache
-    networks: [proxy_admin, admin_backend]
+    networks: [proxy_admin]
     mem_limit: 3g
-    restart: unless-stopped
-
-  qdrant:
-    profiles: ["server"]
-    image: qdrant/qdrant:v1.13.4
-    environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY}
-    volumes: [qdrant_data:/qdrant/storage]
-    networks: [api_backend, admin_backend]
     restart: unless-stopped
 
 networks:
   proxy_api:
   proxy_admin:
   api_backend: { internal: true }
-  admin_backend: { internal: true }
 
 volumes:
   admin_uploads:
   model_cache:
-  qdrant_data:
   redis_data:

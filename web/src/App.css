@@ -128,47 +128,6 @@ button:disabled {
   transform: translateY(-1px);
 }
 
-.api-key-panel {
-  display: grid;
-  gap: 8px;
-  margin-top: 24px;
-  padding: 14px 7px;
-  border-top: 1px solid #43584a;
-}
-
-.api-key-panel label {
-  color: #e8eee9;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.api-key-panel input {
-  width: 100%;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid #536a5b;
-  border-radius: 7px;
-  outline: none;
-  color: #f5f7f5;
-  background: #1b3324;
-  font-size: 12px;
-}
-
-.api-key-panel input:focus {
-  border-color: #a9c5b4;
-}
-
-.api-key-panel input::placeholder {
-  color: #aebdb2;
-}
-
-.api-key-panel p {
-  margin: 0;
-  color: #b6c4ba;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
 .plus-mark {
   color: #c2dacb;
   font-size: 19px;

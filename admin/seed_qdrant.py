@@ -1,11 +1,11 @@
-import os
-from dotenv import load_dotenv
 import logfire
 
-load_dotenv()
+from shared.settings import admin_settings, general_settings
+
 logfire.configure(
     service_name="financial-rag-indexer",
-    send_to_logfire=bool(os.environ.get("LOGFIRE_TOKEN"))
+    token=admin_settings.LOGFIRE_TOKEN,
+    send_to_logfire=bool(admin_settings.LOGFIRE_TOKEN),
 )
 import argparse
 import json
@@ -17,13 +17,12 @@ from fastembed import TextEmbedding
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
-COLLECTION_NAME = "financial_rag_analytics"
-# VECTOR_NAME = "fastembed-BAAI/bge-small-en-v1.5"
-VECTOR_NAME: str = "fastembed-BAAI-bge-small-en-v1-5"
+COLLECTION_NAME = general_settings.COLLECTION_NAME
+VECTOR_NAME = general_settings.VECTOR_NAME
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_QDRANT_PATH = str(BASE_DIR / "data" / "qdrant_storage")
+DEFAULT_QDRANT_PATH = str(BASE_DIR / general_settings.QDRANT_STORAGE_PATH)
 
 
 def _generate_deterministic_uuid(doc_id: str, chunk_id: str) -> str:
@@ -74,8 +73,8 @@ def seed_database(
     if not valid_chunks:
         return 0
 
-    qdrant_url = os.environ.get("QDRANT_URL")
-    qdrant_api_key = os.environ.get("QDRANT_API_KEY")
+    qdrant_url = admin_settings.QDRANT_URL
+    qdrant_api_key = admin_settings.QDRANT_API_KEY
     if not qdrant_url:
         Path(storage_path).mkdir(parents=True, exist_ok=True)
     with logfire.span("connect_qdrant_client", storage_path=storage_path):
@@ -93,7 +92,8 @@ def seed_database(
                 collection_name=COLLECTION_NAME,
                 vectors_config={
                     VECTOR_NAME: models.VectorParams(
-                        size=384, distance=models.Distance.COSINE
+                        size=general_settings.EMBEDDING_DIMENSIONS,
+                        distance=models.Distance.COSINE,
                     )
                 },
             )
@@ -107,17 +107,14 @@ def seed_database(
         ("fiscal_years", models.PayloadSchemaType.INTEGER),
     ]
     for field_name, schema in index_fields:
-        try:
-            client.create_payload_index(
-                collection_name=COLLECTION_NAME,
-                field_name=field_name,
-                field_schema=schema,
-                wait=True,
-            )
-        except Exception:
-            pass  # Index already exists or handle gracefully
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name=field_name,
+            field_schema=schema,
+            wait=True,
+        )
     with logfire.span("generate_embeddings", model=VECTOR_NAME, count=len(valid_chunks)):
-        embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        embedding_model = TextEmbedding(model_name=general_settings.EMBEDDING_MODEL)
         texts = [str(c.get("embedding_text") or c.get("content")).strip() for c in valid_chunks]
 
         embeddings = list(embedding_model.embed(texts, batch_size=32))
@@ -221,7 +218,7 @@ def seed_database(
 
 
 def seed_all_manifests(
-    manifest_dir: Union[str, Path] = BASE_DIR / "data" / "manifests",
+    manifest_dir: Union[str, Path] = BASE_DIR / general_settings.BM25_MANIFEST_PATH,
     storage_path: str = DEFAULT_QDRANT_PATH,
     recreate_collection: bool = False,
 ) -> int:
@@ -249,7 +246,11 @@ def seed_all_manifests(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Seed Qdrant vector database from manifests")
     parser.add_argument("--manifest", help="Path to single manifest file to seed")
-    parser.add_argument("--all", action="store_true", help="Seed all active manifests in data/manifests/")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help=f"Seed all active manifests in {general_settings.BM25_MANIFEST_PATH}",
+    )
     parser.add_argument("--recreate", action="store_true", help="Recreate collection before seeding")
     args = parser.parse_args()
 

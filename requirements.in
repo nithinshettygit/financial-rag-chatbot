@@ -14,7 +14,7 @@ docling
 docling-core
 transformers
 python-dotenv
-flashrank
+voyageai
 logfire[fastapi,httpx]
 redis
 redisvl
@@ -24,6 +24,7 @@ nemoguardrails
 langchain-groq
 presidio-analyzer
 spacy
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 torch==2.14.1+cpu
 torchvision==0.29.2+cpu
 sentence-transformers

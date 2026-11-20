@@ -4,9 +4,9 @@
 
 This report documents the current ingestion implementation under [`admin/`](../admin/): its Streamlit UI, PDF parsing and chunking code, manifest seeder, persisted data contracts, Qdrant integration, and the historical code retained beside the active implementation.
 
-The admin subsystem prepares financial-filing content and stores vectors. It is not the chat API. The downstream FastAPI/RAG service reads the indexed Qdrant collection using the contract described in [`app/config.py`](../app/config.py) and [`app/utils/vector.py`](../app/utils/vector.py).
+The admin subsystem prepares financial-filing content and stores vectors. It is not the chat API. The downstream FastAPI/RAG service reads the indexed Qdrant collection using the contract described in [`app/config.py`](../app/config.py) and [`app/retrieval/qdrant.py`](../app/retrieval/qdrant.py).
 
-**Important current status:** direct upload of an existing manifest can reach the seeder. The PDF parse path has a return-value mismatch between `FastDoclingChunker.process_pdf()` and `run_pipeline()` (details in [Known implementation limitations](#12-known-implementation-limitations)). As written, that mismatch raises before the parser writes a manifest, so the PDF path is not end-to-end operational until the mismatch is corrected.
+**Important current status:** PDF parsing writes the required manifest at the output directory root and auxiliary Markdown/JSON under the configured metadata subdirectory. Both the PDF workflow and direct manifest upload can reach the seeder.
 
 This report describes code behavior as it exists, and distinguishes that behavior from intended flow. It does not claim that a local Qdrant database, remote Qdrant service, OCR model, or external credentials are available at runtime.
 
@@ -15,7 +15,7 @@ This report describes code behavior as it exists, and distinguishes that behavio
 | Path | Role | Active status |
 |---|---|---|
 | [`admin/app.py`](../admin/app.py) | Streamlit UI, upload handling, document-ID normalization, parser/seeder orchestration, session state, and Qdrant configuration controls. | Active UI entry point. |
-| [`admin/parse_pdf.py`](../admin/parse_pdf.py) | Docling PDF conversion, OCR selection, text/table parsing, chunk construction, quality reporting, manifest persistence, and parser CLI. | Active parser imported by the UI; has the return-value issue noted above. |
+| [`admin/parse_pdf.py`](../admin/parse_pdf.py) | Docling PDF conversion, OCR selection, text/table parsing, chunk construction, quality reporting, manifest persistence, and parser CLI. | Active parser imported by the UI and CLI. |
 | [`admin/seed_qdrant.py`](../admin/seed_qdrant.py) | Manifest validation, FastEmbed generation, Qdrant collection/index setup, point upsert, and document-scoped stale-point deletion. | Active seeder imported by the UI and runnable as a CLI. |
 | [`admin/old_files/`](../admin/old_files/) | Archived parser and seeder implementations. | Not imported by the current UI. |
 | [`admin/Untitled16.ipynb`](../admin/Untitled16.ipynb) | Notebook containing an earlier, largely duplicated parsing/chunking implementation and a sample Nike filing run. | Exploratory/legacy; not called by the Streamlit app. |
@@ -32,18 +32,17 @@ flowchart TD
 
     PDF --> TMP[data/temp_uploads/<hash>_<index>/<file>.pdf]
     TMP --> PARSE[FastDoclingChunker<br/>admin/parse_pdf.py]
-    PARSE --> OUT[Expected outputs:<br/>manifest + quality JSON + Docling JSON]
-    PARSE -. current return mismatch .-> PARSEERR[run_pipeline currently raises<br/>before writing parser outputs]
+    PARSE --> OUT[Root manifest + metadata subdirectory artifacts]
 
     MAN --> VALIDATE[Manifest shape validation]
     VALIDATE --> SAVE[data/manifests/<uploaded filename>]
     SAVE --> SEED[seed_database<br/>admin/seed_qdrant.py]
-    OUT -. when parser contract is corrected .-> SEED
+    OUT --> SEED
 
     SEED --> EMB[FastEmbed<br/>BAAI/bge-small-en-v1.5]
     EMB --> POINTS[384-dim named vectors<br/>plus searchable payload]
     POINTS --> Q[(Qdrant<br/>financial_rag_analytics)]
-    Q --> RET[QdrantVectorRetriever<br/>app/utils/vector.py]
+    Q --> RET[QdrantVectorRetriever<br/>app/retrieval/qdrant.py]
     RET --> API[FastAPI / RAG query pipeline]
 ```
 
@@ -244,15 +243,18 @@ The chunk model defaults `chunk_type` to `text`, headings to an empty list, and 
 
 The parser recognizes years in column labels with a `19xx`, `20xx`, or `21xx`-style four-digit pattern, but only years found in columns are used for parser-generated table-fact year metadata.
 
-### 6.2 Files the parser intends to persist
+### 6.2 Parser output files
 
-When the parser contract is functioning, `run_pipeline()` is intended to write under its `out_dir`:
+`run_pipeline()` writes the required manifest directly under `out_dir` and keeps
+auxiliary parser artifacts in an `out_dir/metadata/` subdirectory:
 
-- `<doc_id>_manifest.json`: array of chunk objects;
-- `<doc_id>_quality.json`: extraction/quality report;
-- `<doc_id>_docling.json`: lossless Docling document JSON, with a warning logged if this optional save fails.
+- `<doc_id>_manifest.json`: required array of chunk objects, kept at the manifest directory root for indexing and BM25 retrieval;
+- `metadata/<doc_id>_document.md`: Markdown rendering of the source document;
+- `metadata/<doc_id>_quality.json`: extraction/quality report;
+- `metadata/<doc_id>_docling.json`: lossless Docling document JSON, with a warning logged if this optional save fails.
 
-The UI passes `data/manifests/` as the output directory. The code that would write `<doc_id>_document.md` is commented out; that Markdown file is not an active parser output.
+The UI passes `data/manifests/` as the output directory. Manifest discovery scans
+root-level JSON files only; auxiliary JSON files under `metadata/` are not seeded.
 
 ## 7. Manifest validation and Qdrant indexing
 
@@ -326,7 +328,7 @@ Because empty-content chunks are filtered before document grouping, a document r
 
 ### 7.3 Payload contract consumed by retrieval
 
-The service’s [`QdrantVectorRetriever`](../app/utils/vector.py) queries the same collection using the configured named vector, and reads content, document, source, page, type, headings, metadata, company, and fiscal-year fields. The seeder’s payload indexes support the service’s document/company/year filtering. The seeder adds top-level metadata fields as well as the full `metadata` object so retrieval can use commonly filtered/displayed fields without unpacking every nested value.
+The service’s [`QdrantVectorRetriever`](../app/retrieval/qdrant.py) queries the same collection using the configured named vector, and reads content, document, source, page, type, headings, metadata, company, and fiscal-year fields. The seeder’s payload indexes support the service’s document/company/year filtering. The seeder adds top-level metadata fields as well as the full `metadata` object so retrieval can use commonly filtered/displayed fields without unpacking every nested value.
 
 The admin local storage default is derived from the repository root in `seed_qdrant.py`; the service setting defaults to `data/qdrant_storage`. The admin UI sidebar can override its local path. These paths must refer to the same Qdrant data if local mode is used.
 
@@ -347,10 +349,10 @@ The UI does not expose parser OCR/device settings; it uses `run_pipeline()` defa
 `admin/parse_pdf.py` supports:
 
 ```powershell
-python admin/parse_pdf.py --pdf <path> --doc-id <id> --out-dir data/manifests --device auto --ocr auto
+python admin/parse_pdf.py --pdf <path> --doc-id <id> --device auto --ocr auto
 ```
 
-`--pdf` and `--doc-id` are required. `--device` choices: `auto`, `cpu`, `cuda`, `mps`. `--ocr` choices: `auto`, `on`, `off`. This CLI calls the same `run_pipeline()` function as the UI and is affected by the same return-value mismatch.
+`--pdf` and `--doc-id` are required. `--device` choices: `auto`, `cpu`, `cuda`, `mps`. `--ocr` choices: `auto`, `on`, `off`. The output directory defaults to shared `BM25_MANIFEST_PATH`; auxiliary files use the configured `MANIFEST_METADATA_SUBDIR`.
 
 ### Seeder CLI
 
@@ -366,14 +368,14 @@ python admin/seed_qdrant.py --all --recreate
 - `--all` indexes JSON files under `data/manifests/`.
 - `--recreate` opts into deleting/recreating the collection before the initial manifest in an all-manifest run.
 - If neither `--manifest` nor `--all` is supplied, the CLI defaults to all active manifests.
-- The all-manifest scan is sorted and excludes names beginning `old_`, containing `_old` or `cache`, ending `.bak`, and ending `_quality.json` or `_docling.json`.
+- The all-manifest scan is sorted and reads root-level JSON files only; auxiliary files under the configured metadata subdirectory are not candidates.
 - The CLI does not expose a storage-path argument; it uses the seeder’s default or remote connection environment variables.
 
 ## 9. Logging, environment, and side effects
 
 - The UI and seeder both load `.env` and configure Logfire; remote Logfire sending is conditional on `LOGFIRE_TOKEN`.
 - The UI adds spans around PDF parse and both indexing actions. The parser records conversion, chunk processing, fallback, and quality events. The seeder records manifest loading, Qdrant connection, embedding, point building, upsert, and completion spans.
-- Local filesystem writes include PDF temp files and uploaded JSON manifests. Parser outputs are intended to be written under `data/manifests/`, but the current return-value mismatch prevents those writes in `run_pipeline()`. Uploaded-manifest basename collisions can overwrite a previous file.
+- Local filesystem writes include PDF temp files and uploaded JSON manifests. PDF parsing writes required manifests under `data/manifests/` and auxiliary Markdown/JSON under `data/manifests/metadata/`. Uploaded-manifest basename collisions can overwrite a previous file.
 - Qdrant side effects include collection creation, payload-index creation attempts, point upserts, stale-point deletions for re-indexed document IDs, and optional whole-collection deletion.
 - Whole-collection recreation is destructive and affects every document in that collection. The UI requires explicit confirmation; CLI recreation requires `--recreate`.
 - Remote Qdrant settings are environment-driven. When `QDRANT_URL` is configured, it takes precedence over the UI’s local storage-path control.
@@ -398,19 +400,14 @@ For newly indexed content to appear in financial RAG queries, all of these condi
 
 The retrieval implementation performs dense query embedding with the configured model and uses the named vector when querying Qdrant. The admin writes vectors and payloads; it does not update a separate chat-side manifest index itself.
 
-## 12. Known implementation limitations
+## 12. Operational details and limitations
 
-### 12.1 PDF parse return-value mismatch (blocks PDF ingestion)
+### 12.1 Manifest and metadata separation
 
-`FastDoclingChunker.process_pdf()` returns two values: `(chunks, doc.export_to_markdown())`. However, `run_pipeline()` assigns that pair to one variable:
-
-```python
-chunks = chunker.process_pdf(pdf_path, doc_id)
-```
-
-It then treats `chunks` as a list of `DocumentChunk` objects when calling `asdict(c)`. The first element is actually the entire chunk list, so `asdict()` receives a list rather than a dataclass and raises before the manifest, quality JSON, or Docling JSON can be written. The UI also expects `run_pipeline()` to return a chunk list and manifest path. Consequently, the PDF upload/parse workflow currently fails; its intended parse summary and subsequent PDF indexing cannot be reached through this implementation as written. The parser CLI has the same underlying issue.
-
-This is documented as an implementation defect, not as intended behavior. The manifest upload tab does not invoke `run_pipeline()` and is not affected by this specific mismatch.
+`MANIFEST_METADATA_SUBDIR` in the shared settings controls where auxiliary
+parser files are written beneath the configured manifest directory. The
+required manifest stays at the root; bulk seeding scans root-level JSON files,
+and BM25 excludes JSON files under the metadata subdirectory.
 
 ### 12.2 Other behavior to account for
 
@@ -428,5 +425,5 @@ This is documented as an implementation defect, not as intended behavior. The ma
 - Archived parser/seeder code: [`admin/old_files/`](../admin/old_files/)
 - Legacy notebook: [`admin/Untitled16.ipynb`](../admin/Untitled16.ipynb)
 - Service Qdrant/model settings: [`app/config.py`](../app/config.py)
-- Service-side Qdrant retrieval and payload reads: [`app/utils/vector.py`](../app/utils/vector.py)
+- Service-side Qdrant retrieval and payload reads: [`app/retrieval/qdrant.py`](../app/retrieval/qdrant.py)
 - Example generated manifest: [`data/manifests/Nike-Inc-2026-10K_manifest.json`](../data/manifests/Nike-Inc-2026-10K_manifest.json)

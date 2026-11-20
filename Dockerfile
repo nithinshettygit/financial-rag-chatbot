@@ -17,12 +17,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-COPY requirements.in ./
-RUN pip install -r requirements.in \
-    && python -m spacy download en_core_web_sm
-# RUN pip install sentence-transformers
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
 
+COPY config ./config
+COPY shared ./shared
+COPY prompts ./prompts
 COPY app ./app
 COPY admin ./admin
 COPY data/manifests ./data/manifests

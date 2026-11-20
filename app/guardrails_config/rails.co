@@ -83,5 +83,5 @@ define subflow check numeric grounding
 
 # --------------------------- optional: fact checking -------------------------
 # Enable by adding `self check facts` to rails.output.flows in config.yml and
-# defining a `self_check_facts` prompt in prompts.yml. It costs one extra LLM
+# defining a `self_check_facts` prompt in prompts/guardrails.yaml. It costs one extra LLM
 # call per answer, and needs no flow definition here (NeMo ships it built in).

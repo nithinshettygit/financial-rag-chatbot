@@ -1,17 +1,15 @@
 # admin/app.py
 import hmac
-import os
 
-from dotenv import load_dotenv
 import logfire
 
-# Load the .env file so os.environ can find LOGFIRE_TOKEN
-load_dotenv() 
+from shared.settings import admin_settings, general_settings
 
 # Globally configure Logfire once for the entire application lifecycle
 logfire.configure(
     service_name="financial-rag-engine",
-    send_to_logfire=bool(os.environ.get("LOGFIRE_TOKEN"))
+    token=admin_settings.LOGFIRE_TOKEN,
+    send_to_logfire=bool(admin_settings.LOGFIRE_TOKEN),
 )
 logfire.instrument_pydantic()
 
@@ -20,6 +18,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import streamlit as st
 # Ensure the admin directory is in sys.path to guarantee imports resolve
@@ -32,12 +31,9 @@ from seed_qdrant import seed_database, validate_manifest_chunks
 
 # Dynamic base directory configuration (relative to project root)
 BASE_DIR = ADMIN_DIR.parent
-DATA_DIR = BASE_DIR / "data"
-MANIFEST_DIR = DATA_DIR / "manifests"
-TEMP_DIR = DATA_DIR / "temp_uploads"
-# QDRANT_STORAGE_PATH = str(DATA_DIR / "qdrant_storage")
-# QDRANT_URL = os.environ["QDRANT_URL"]
-# QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
+DATA_DIR = BASE_DIR / general_settings.DATA_DIR
+MANIFEST_DIR = BASE_DIR / general_settings.BM25_MANIFEST_PATH
+TEMP_DIR = DATA_DIR / general_settings.TEMP_UPLOAD_DIR
 
 
 
@@ -58,8 +54,8 @@ st.set_page_config(
 
 
 def require_admin_login() -> None:
-    admin_username = os.environ.get("ADMIN_USERNAME")
-    admin_password = os.environ.get("ADMIN_PASSWORD")
+    admin_username = admin_settings.ADMIN_USERNAME
+    admin_password = admin_settings.ADMIN_PASSWORD
     if not admin_username or not admin_password:
         st.error("Admin access is disabled. Configure ADMIN_USERNAME and ADMIN_PASSWORD.")
         st.stop()
@@ -94,20 +90,27 @@ def require_admin_login() -> None:
 
 require_admin_login()
 
+qdrant_url = (admin_settings.QDRANT_URL or "").strip()
+qdrant_api_key = (admin_settings.QDRANT_API_KEY or "").strip()
+if not qdrant_url or not qdrant_api_key:
+    st.error("Qdrant Cloud is not configured. Set QDRANT_URL and QDRANT_API_KEY.")
+    st.stop()
+
+try:
+    parsed_qdrant_url = urlsplit(qdrant_url)
+except ValueError:
+    st.error("QDRANT_URL is invalid. Configure a valid HTTPS Qdrant Cloud URL.")
+    st.stop()
+
+if parsed_qdrant_url.scheme != "https" or not parsed_qdrant_url.hostname:
+    st.error("QDRANT_URL must be an HTTPS Qdrant Cloud URL.")
+    st.stop()
+
 st.title("Multi-Document Financial RAG Ingestion Pipeline")
-st.caption("Extract, structure, and index financial PDFs or pre-parsed manifests into Qdrant")
+st.caption("Extract, structure, and index financial PDFs or pre-parsed manifests into Qdrant Cloud")
 
 st.sidebar.header("Pipeline Configuration")
-qdrant_path = st.sidebar.text_input(
-    "Qdrant Storage Path",
-    value=QDRANT_STORAGE_PATH,
-    help="Used for local Qdrant. QDRANT_URL in the environment takes precedence when configured.",
-)
-qdrant_url = os.environ.get("QDRANT_URL")
-if qdrant_url:
-    st.sidebar.caption("Using remote Qdrant configured by QDRANT_URL.")
-else:
-    st.sidebar.caption("Using local Qdrant storage.")
+st.sidebar.caption("Indexing is configured for Qdrant Cloud.")
 
 recreate_collection_requested = st.sidebar.checkbox(
     "Recreate Collection on Indexing",
@@ -198,7 +201,6 @@ with tab_pdf:
                             with st.spinner("Embedding and indexing into Qdrant..."):
                                 indexed_count = seed_database(
                                     manifest_path=manifest_info["path"],
-                                    storage_path=qdrant_path,
                                     recreate_collection=recreate_collection,
                                 )
                                 logfire.info("UI Qdrant indexing completed", indexed_count=indexed_count, doc_id=doc_id)
@@ -291,7 +293,6 @@ with tab_manifest:
                         with st.spinner("Indexing pre-parsed chunks into Qdrant vector database..."):
                             indexed_count = seed_database(
                                 manifest_path=saved_manifest_path,
-                                storage_path=qdrant_path,
                                 recreate_collection=recreate_collection,
                             )
                             st.success(f"Successfully indexed {indexed_count} vectors from `{manifest_file_upload.name}` into Qdrant!")

@@ -1,5 +1,6 @@
 .env*
 **/.env*
+.env.production
 venv*
 .venv*
 .git
@@ -8,5 +9,16 @@ web/dist
 data/qdrant_storage
 data/qdrant_storage_backup
 data/temp_uploads
+data/manifests/*
+!data/manifests/.gitkeep
+!data/manifests/*.json
 **/__pycache__
 *.pyc
+deploy/certs
+deploy/secrets
+venv312
+unused/
+!.env.production.example
+z-Present/*
+
+venv312/

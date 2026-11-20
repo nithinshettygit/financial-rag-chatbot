@@ -9,15 +9,16 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.schemas import ChatTurn, SessionState
-from app.utils.llm import chat_with_retry, get_groq_clients
+from app.utils.llm import chat_with_retry, extract_completion_text, get_groq_clients
 from app.utils.logger import logger
 from app.utils.tokens import count_tokens, log_token_usage
+from shared.prompts import render_prompt
 
 client = get_groq_clients(timeout=20.0)  # on failure we fall back to heuristics
 
 _YEAR_RE = re.compile(r"\b(201\d|202\d|203\d)\b")
 _SUFFIXES = {"inc", "incorporated", "corp", "corporation", "company", "co", "ltd", "limited", "plc"}
-MAX_SUB_QUERIES = 12
+MAX_SUB_QUERIES = settings.MAX_SUB_QUERIES
 
 FOLLOWUP_TYPES = {"none", "reference", "elaboration"}
 DEFAULT_ASPECTS = [
@@ -40,6 +41,42 @@ _REF_RE = re.compile(
     r"\b(?:it|its|that|this|those|these|them|they|their|he|she)\b|^\s*(?:and|also|what about|how about|same for)\b",
     re.I,
 )
+
+
+def validate_router_response(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    for key in ("intent", "followup_type", "search_query"):
+        if key in data and (not isinstance(data[key], str) or len(data[key]) > 2000):
+            return {}
+    for key in ("entities", "metrics", "aspects"):
+        value = data.get(key, [])
+        if (
+            not isinstance(value, list)
+            or len(value) > 20
+            or any(not isinstance(item, str) or len(item) > 300 for item in value)
+        ):
+            return {}
+    years = data.get("fiscal_years", [])
+    if (
+        not isinstance(years, list)
+        or len(years) > 20
+        or any(type(year) is not int and (not isinstance(year, str) or len(year) > 20) for year in years)
+    ):
+        return {}
+    state = data.get("state", {})
+    state_limits = {"company": 200, "fiscal_year": 20, "target_metric": 200, "document_id": 200}
+    if state is not None and (
+        not isinstance(state, dict)
+        or any(key not in state_limits for key in state)
+        or any(
+            value is not None
+            and (not isinstance(value, str) or len(value) > state_limits[key])
+            for key, value in state.items()
+        )
+    ):
+        return {}
+    return data
 
 
 class QueryFilters(BaseModel):
@@ -160,47 +197,14 @@ def _call_router_llm(query: str, history: List[ChatTurn], state: SessionState, k
     history_text = "\n".join(
         f"{t.role}: {t.content if t.role == 'user' else t.content[:600]}" for t in recent
     )
-    prompt = f"""You are a query router for an enterprise multi-document financial RAG system.
-
-Indexed companies: {json.dumps(known)}
-Current Session State: {json.dumps(state.model_dump())}
-Recent Conversation:
-{history_text or "No prior history"}
-
-Latest User Query: "{query}"
-
-Tasks:
-1. intent:
-   - "rag_search": questions about companies' financial filings (data, metrics, history, risks, comparisons).
-   - "chat_summary": the user asks to summarize/recap our conversation.
-   - "general_chat": ONLY greetings, thanks, and questions about what this assistant can do.
-   - "out_of_scope": EVERYTHING else - requests to perform actions or transactions (payments, transfers,
-     purchases, bookings), unrelated tasks (coding, writing, general knowledge, math), personal or investment
-     advice, or anything that is not about the indexed filings. When in doubt between "out_of_scope" and
-     "rag_search", choose "rag_search" only if the message is plausibly about a company's filings or a follow-up to one.
-2. followup_type:
-   - "none": the query is fully self-contained.
-   - "reference": the query is a NEW question that omits the company/year/metric and relies on the conversation
-     (e.g. "what about 2025?", "and for Duolingo?", "what was its net income?").
-   - "elaboration": the user wants MORE DETAIL on the topic already answered
-     (e.g. "tell me more", "elaborate", "why?", "explain that").
-3. entities: ALL companies the latest query is about (resolve pronouns from the conversation/state).
-4. metrics: distinct topics asked about (short noun phrases). For "elaboration", the topic being elaborated.
-5. fiscal_years: list of years requested (resolve from conversation/state when omitted).
-6. search_query: a fully STANDALONE question that makes sense with no conversation.
-   - Keep EVERY distinguishing qualifier from the user's wording (e.g. "sources", "details", "breakdown", "growth").
-   - "reference": inline the resolved company, year and metric.
-   - "elaboration": restate the topic and ask for additional detail not already covered.
-7. aspects: ONLY for "elaboration": 2-4 distinct angles NOT yet covered in the previous assistant answer
-   (e.g. "breakdown by segment", "regional split", "key drivers", "year-over-year change"). Otherwise [].
-8. state: company, fiscal_year, target_metric, document_id.
-
-Return ONLY JSON:
-{{"intent": "rag_search"|"chat_summary"|"general_chat"|"out_of_scope",
-  "followup_type": "none"|"reference"|"elaboration",
-  "entities": [str], "metrics": [str], "fiscal_years": [int],
-  "search_query": str, "aspects": [str],
-  "state": {{"company": str|null, "fiscal_year": str|null, "target_metric": str|null, "document_id": str|null}}}}"""
+    prompt = render_prompt(
+        "router.yaml",
+        "query_router",
+        known_companies=json.dumps(known),
+        session_state=json.dumps(state.model_dump()),
+        history=history_text or "No prior history",
+        query=query,
+    )
     with logfire.span("Query Router LLM") as router_span:
         estimated_input = count_tokens(prompt)
         router_span.set_attribute("input_tokens_estimate", estimated_input)
@@ -218,13 +222,20 @@ Return ONLY JSON:
             router_span.set_attribute("total_tokens", estimated_input)
             router_span.set_attribute("llm_calls", 1)
             router_span.set_attribute("token_count_source", "estimate")
-            logger.error(f"Router LLM failed: {e}")
+            logger.error("Router LLM failed: %s", type(e).__name__)
             return {}
-        response_text = resp.choices[0].message.content or ""
+        try:
+            response_text = extract_completion_text(resp)
+        except ValueError as e:
+            logger.error("Router LLM returned a malformed completion: %s", type(e).__name__)
+            return {}
         log_token_usage(router_span, resp, estimated_input, count_tokens(response_text))
         try:
             data = json.loads(response_text)
-            return data if isinstance(data, dict) else {}
+            validated = validate_router_response(data)
+            if not validated:
+                logger.error("Router LLM returned an invalid response shape")
+            return validated
         except (TypeError, ValueError) as e:
             logger.error(f"Router LLM returned invalid JSON: {e}")
             return {}

@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +20,7 @@ import yaml
 from app.config import settings
 from app.utils import guard_rules as rules
 from app.utils.tokens import count_tokens
+from shared.prompts import load_prompt, load_prompt_file
 
 _REFUSAL = "I can only help with questions about the indexed financial filings, and I can't help with that request."
 REFUSAL_SCOPE = (
@@ -34,6 +34,7 @@ _REFUSAL_FIGURES = (
 )
 
 _rails = None
+_fallback_rails = None
 _lock = threading.Lock()
 
 
@@ -49,23 +50,43 @@ class GuardResult:
     llm_calls: int = 0
 
 
-@lru_cache(maxsize=1)
 def _self_check_input_prompt() -> str:
-    prompt_path = Path(settings.GUARDRAILS_PATH) / "prompts.yml"
-    with prompt_path.open(encoding="utf-8") as prompt_file:
-        prompts = yaml.safe_load(prompt_file)
-    for prompt in prompts.get("prompts", []):
-        if prompt.get("task") == "self_check_input":
-            return str(prompt.get("content", ""))
-    raise ValueError(f"No self_check_input prompt found in {prompt_path}")
+    return load_prompt("guardrails.yaml", "self_check_input")
 
 
-def _build_rails():
+def _load_rails_config():
+    from nemoguardrails import RailsConfig
+
+    guardrails_path = Path(settings.GUARDRAILS_PATH)
+    with (guardrails_path / "config.yml").open(encoding="utf-8") as config_file:
+        config = yaml.safe_load(config_file)
+    if not isinstance(config, dict):
+        raise ValueError(f"Expected a YAML mapping in {guardrails_path / 'config.yml'}")
+
+    prompt_definitions = load_prompt_file("guardrails.yaml").get("prompts")
+    if not isinstance(prompt_definitions, list):
+        raise ValueError("Expected a prompts list in the shared guardrails prompt file")
+    config["prompts"] = prompt_definitions
+    config["config_path"] = str(guardrails_path)
+    colang_content = "\n\n".join(
+        colang_file.read_text(encoding="utf-8")
+        for colang_file in sorted(guardrails_path.rglob("*.co"))
+    )
+    rails_config = RailsConfig.from_content(config=config, colang_content=colang_content)
+    rails_config.config_path = str(guardrails_path.resolve())
+    return rails_config
+
+
+def _build_rails(api_key: str | None = None):
     from langchain_groq import ChatGroq
-    from nemoguardrails import LLMRails, RailsConfig
+    from nemoguardrails import LLMRails
 
-    config = RailsConfig.from_path(settings.GUARDRAILS_PATH)
-    llm = ChatGroq(model=settings.GUARDRAIL_LLM_MODEL, api_key=settings.GROQ_API_KEY, temperature=0)
+    config = _load_rails_config()
+    llm = ChatGroq(
+        model=settings.GUARDRAIL_LLM_MODEL,
+        api_key=api_key or settings.GROQ_API_KEY,
+        temperature=0,
+    )
     return LLMRails(config, llm=llm)
 
 
@@ -77,9 +98,46 @@ def get_rails():
     return _rails
 
 
+def _get_fallback_rails():
+    global _fallback_rails
+    with _lock:
+        if _fallback_rails is None:
+            if not settings.FALLBACK_GROQ_API_KEY:
+                raise RuntimeError("Fallback Groq key is not configured")
+            _fallback_rails = _build_rails(settings.FALLBACK_GROQ_API_KEY)
+    return _fallback_rails
+
+
+async def _check_rails(messages, rail_types):
+    has_fallback = bool(
+        settings.FALLBACK_GROQ_API_KEY
+        and settings.FALLBACK_GROQ_API_KEY != settings.GROQ_API_KEY
+    )
+    last_error = None
+    for fallback in (False, True) if has_fallback else (False,):
+        try:
+            rails = _get_fallback_rails() if fallback else get_rails()
+            return await asyncio.wait_for(
+                rails.check_async(messages, rail_types=rail_types),
+                timeout=settings.GUARDRAILS_TIMEOUT_S,
+            )
+        except Exception as error:
+            last_error = error
+            if not fallback and has_fallback:
+                logfire.warn(
+                    "Primary guardrail provider failed; trying configured fallback",
+                    error_type=type(error).__name__,
+                )
+    if last_error:
+        raise last_error
+    raise RuntimeError("No guardrail provider is available")
+
+
 def warmup_guardrails() -> None:
     if settings.GUARDRAILS_ENABLED:
         get_rails()
+        if settings.FALLBACK_GROQ_API_KEY and settings.FALLBACK_GROQ_API_KEY != settings.GROQ_API_KEY:
+            _get_fallback_rails()
 
 
 # --------------------------------------------------------------------------- #
@@ -117,9 +175,9 @@ async def check_input(text: str) -> GuardResult:
         logfire.warn("Input guardrail token estimate unavailable: {err}", err=repr(e))
         estimated_input = count_tokens(text)
     try:
-        res = await asyncio.wait_for(
-            get_rails().check_async([{"role": "user", "content": text}], rail_types=[RailType.INPUT]),
-            timeout=settings.GUARDRAILS_TIMEOUT_S,
+        res = await _check_rails(
+            [{"role": "user", "content": text}],
+            rail_types=[RailType.INPUT],
         )
     except Exception as e:  # NeMo error, Groq outage, timeout...
         logfire.error("Input guardrails failed: {err}", err=repr(e))
@@ -155,10 +213,7 @@ async def check_output(query: str, answer: str, evidence: str) -> GuardResult:
         {"role": "assistant", "content": answer},
     ]
     try:
-        res = await asyncio.wait_for(
-            get_rails().check_async(messages, rail_types=[RailType.OUTPUT]),
-            timeout=settings.GUARDRAILS_TIMEOUT_S,
-        )
+        res = await _check_rails(messages, rail_types=[RailType.OUTPUT])
     except Exception as e:
         logfire.error("Output guardrails failed: {err}", err=repr(e))
         return _fallback_output(answer, evidence) if settings.GUARDRAILS_FAIL_OPEN else GuardResult(

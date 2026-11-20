@@ -89,3 +89,34 @@ Introduced logfire for parsing and seeding qdrant including streamlit updating
 
 redis chaching implmnt: 
 working , failed for semantically similar queries: year and company hallucination
+
+
+
+
+
+
+
+
+The main pieces are separated sensibly: web/ for React, app/ for FastAPI/RAG, admin/ for the Streamlit admin UI, shared/ and config/ for shared settings, and deploy/ for deployment configuration. That’s a sensible shape for this project; “industry standard” doesn’t mean there’s one mandatory folder layout.
+
+Main gaps I’d address:
+
+Some backend boundaries are fuzzy: orchestration is concentrated in app/pipeline.py, app/services/ currently contains only retrieval, and app/utils/ contains a mix of infrastructure and domain logic. As the code grows, organize by capability—such as retrieval, guardrails, and model integrations—rather than letting utils/ become a catch-all.
+Build/release structure needs strengthening: there’s no root README, no dependency lock used by the Docker build, and I found no GitHub Actions workflow. These matter more for team onboarding and reliable releases than changing folder names.
+Data and documentation need clearer boundaries
+
+19/11/2026 :
+
+
+
+python -m pip install "pip-tools==7.7.0"
+pip-compile --resolver=backtracking --strip-extras --allow-unsafe \
+  -o requirements.txt requirements.in
+
+
+cleaned strcure , kept prompts/ sepeartely [yaml]
+unified  configuration settings, shared settingscleaned evalation
+migrated from 
+
+
+

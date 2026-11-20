@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Financial RAG Application – Architecture</title>
+<style>
+:root{--bg:#fafaf9;--panel:#fff;--side:#f4f4f2;--text:#1c1c1a;--muted:#6b6b66;--line:#e5e5e1;--acc:#2563eb;--accbg:#e8f0fe;--code:#f1f1ee;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121211;--panel:#1b1b19;--side:#171716;--text:#ececea;--muted:#9a9a94;--line:#2c2c29;--acc:#7aa2ff;--accbg:#1e2a45;--code:#262624;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#121211;--panel:#1b1b19;--side:#171716;--text:#ececea;--muted:#9a9a94;--line:#2c2c29;--acc:#7aa2ff;--accbg:#1e2a45;--code:#262624;color-scheme:dark}
+html{scroll-behavior:smooth;scroll-padding-top:calc(72px + env(safe-area-inset-top,0px))}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;height:56px;display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--panel);z-index:21}
+header .name{font-weight:650}
+header .date{color:var(--muted);font-size:14px;margin-left:auto}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:8px;padding:5px 10px}
+#menu{display:none}
+.wrap{display:flex;max-width:1280px;margin:0 auto}
+nav{width:250px;flex:none;position:sticky;top:calc(56px + env(safe-area-inset-top,0px));align-self:flex-start;height:calc(100vh - 56px);overflow:auto;padding:20px 14px;background:var(--side);border-right:1px solid var(--line)}
+nav h6{margin:18px 10px 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+nav h6:first-child{margin-top:0}
+nav a{display:block;padding:6px 10px;border-radius:8px;color:var(--text);text-decoration:none;font-size:14.5px}
+nav a:hover{background:var(--line)}
+nav a.on{background:var(--accbg);color:var(--acc);font-weight:600}
+main{flex:1;min-width:0;padding:32px clamp(18px,4vw,56px) 80px}
+section{margin-bottom:56px}
+h1{font-size:34px;line-height:1.2;margin:0 0 8px}
+h2{font-size:24px;margin:0 0 14px;padding-top:6px}
+h3{font-size:17px;margin:26px 0 8px}
+p{margin:0 0 12px}
+.lead{font-size:18px;color:var(--muted);max-width:720px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:20px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.card b{display:block;font-size:22px;color:var(--acc);line-height:1.2}
+.card span{font-size:13px;color:var(--muted)}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:14.5px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--side);font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+code{background:var(--code);padding:1px 6px;border-radius:5px;font:13px ui-monospace,Menlo,Consolas,monospace}
+ul{padding-left:22px;margin:0 0 12px}li{margin:4px 0}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0;padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+.box{border:1.5px solid var(--line);background:var(--bg);border-radius:10px;padding:8px 12px;font-size:13.5px;text-align:center;line-height:1.35}
+.box small{display:block;color:var(--muted);font-size:11.5px}
+.box.a{border-color:var(--acc);background:var(--accbg)}
+.ar{color:var(--muted);font-size:18px}
+.lbl{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:18px 0 -4px}
+.note{border-left:3px solid var(--acc);background:var(--accbg);padding:10px 14px;border-radius:0 10px 10px 0;margin:12px 0}
+.lane{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center;padding:10px 0;border-bottom:1px dashed var(--line)}.lane:last-child{border:0}.lane>b{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}.lane>div{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.dn{text-align:center;color:var(--muted);font-size:12px;margin:-4px 0}.map{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px 18px;margin:14px 0}.box.r{border-color:#d97706;background:#fef3c71a}.box.g{border-color:#059669}ol.st{padding-left:20px}ol.st li{margin:6px 0}@media (max-width:860px){.lane{grid-template-columns:1fr}#menu{display:inline-block}nav{position:fixed;left:0;top:calc(56px + env(safe-area-inset-top,0px));z-index:15;transform:translateX(-100%);transition:transform .2s;height:calc(100% - 56px);box-shadow:4px 0 20px #0003}nav.open{transform:none}h1{font-size:28px}}
+</style>
+</head>
+<body>
+<header>
+<button id="menu" aria-label="Menu">☰</button>
+<span class="name">Financial RAG Application</span>
+<span class="date">November 19, 2026</span>
+<button id="theme" aria-label="Toggle theme">◐</button>
+</header>
+<div class="wrap">
+<nav id="nav">
+<h6>Introduction</h6><a href="#overview">Overview</a><a href="#architecture">Architecture</a><a href="#bigpic">Big picture</a><a href="#sysmap">Full system map</a><a href="#lifecycle">Request lifecycle</a>
+<h6>Pipeline</h6><a href="#data">Data</a><a href="#ingestion">Ingestion</a><a href="#retrieval">Retrieval</a><a href="#generation">Answer generation</a>
+<h6>Deep dives</h6><a href="#admin">Admin and ingestion</a><a href="#parsing">PDF parsing and chunking</a><a href="#seeding">Qdrant seeding</a><a href="#evaluation">Evaluation</a><a href="#planner">Query planner and state</a><a href="#cache">Cache</a><a href="#guardrails">Guardrails and PII</a><a href="#rates">Rate limits and queue</a><a href="#prompts">Prompts and models</a>
+<h6>Reference</h6><a href="#config">Configuration</a><a href="#security">Security and privacy</a><a href="#deployment">Deployment</a>
+</nav>
+<main>
+
+<section id="overview">
+<h1>Financial RAG Application</h1>
+<p class="lead">A question-answering service over financial filings. It checks the question, finds the right filing passages, writes an answer from them and returns the answer with its sources.</p>
+<div class="cards">
+<div class="card"><b>1</b><span>Groq model for planning, policy checks and answers</span></div>
+<div class="card"><b>384</b><span>Embedding dimensions (BGE-small)</span></div>
+<div class="card"><b>30 → 5</b><span>Candidates per retriever, then final chunks</span></div>
+<div class="card"><b>4,096</b><span>Max evidence tokens per answer</span></div>
+<div class="card"><b>80 s</b><span>Server deadline per chat request</span></div>
+<div class="card"><b>24 h</b><span>Answer cache lifetime</span></div>
+</div>
+<h3>Who it is for</h3>
+<p>People who ask questions about companies in the indexed filings, such as a metric for a given year or a comparison of two companies. Operators use a separate admin tool to load documents.</p>
+<h3>What it does</h3>
+<ul>
+<li>Accepts a chat message and decides whether it is in scope.</li>
+<li>Resolves follow-ups into a company, year and metric.</li>
+<li>Searches with dense vectors and BM25 in parallel, then reranks.</li>
+<li>Answers only from the retrieved evidence, with <code>[S1]</code>-style source tags.</li>
+<li>Checks the answer and returns it with the supporting chunks.</li>
+</ul>
+</section>
+
+<section id="architecture">
+<h2>Architecture</h2>
+<p>The chat service never parses PDFs or creates document embeddings. Ingestion is a separate admin workflow that fills the same vector store and manifest folder.</p>
+<div class="lbl">Online request path</div>
+<div class="flow">
+<div class="box">React client</div><span class="ar">→</span>
+<div class="box">FastAPI<small>session, rate limits, queue</small></div><span class="ar">→</span>
+<div class="box">Input checks<small>PII, injection, policy</small></div><span class="ar">→</span>
+<div class="box">Query planner<small>intent, entities, years</small></div><span class="ar">→</span>
+<div class="box a">Cache<small>exact, then semantic</small></div><span class="ar">→</span>
+<div class="box a">Qdrant + BM25<small>in parallel</small></div><span class="ar">→</span>
+<div class="box a">RRF fusion</div><span class="ar">→</span>
+<div class="box a">Voyage reranker</div><span class="ar">→</span>
+<div class="box">Context packing<small>source tags</small></div><span class="ar">→</span>
+<div class="box a">Groq answer</div><span class="ar">→</span>
+<div class="box">Output checks<small>leak, PII, numbers</small></div><span class="ar">→</span>
+<div class="box">Answer + sources</div>
+</div>
+<div class="lbl">Ingestion path (admin)</div>
+<div class="flow">
+<div class="box">Filing PDFs or manifests</div><span class="ar">→</span>
+<div class="box">Docling parse and chunk</div><span class="ar">→</span>
+<div class="box">JSON manifests<small>feed BM25</small></div><span class="ar">+</span>
+<div class="box a">Qdrant collection<small>feeds dense search</small></div>
+</div>
+<h3>Fast paths and exits</h3>
+<div class="tw"><table>
+<tr><th>Case</th><th>What happens</th></tr>
+<tr><td>Clear small talk</td><td>Short reply from the model. Skips the full input checks.</td></tr>
+<tr><td>Clear out-of-scope</td><td>Fixed scope refusal. No retrieval.</td></tr>
+<tr><td>General chat</td><td>Short reply with output checks. Not cached.</td></tr>
+<tr><td>Chat summary</td><td>Summary of supplied history. Not cached.</td></tr>
+<tr><td>Cache hit</td><td>Cached answer and chunks returned at once.</td></tr>
+<tr><td>No usable evidence</td><td>Fixed "no support" reply. No generation.</td></tr>
+</table></div>
+</section>
+
+<section id="bigpic">
+<h2>End-to-end architecture, one picture</h2>
+<p>The whole system in four zones: ingestion, shared stores, the online chat path and offline evaluation. Scroll sideways on small screens.</p>
+<div class="tw" style="padding:8px;overflow-x:auto"><svg id="bp" viewBox="0 0 1400 1035" style="width:100%;min-width:1100px;height:auto;display:block" font-family="system-ui,sans-serif" role="img" aria-label="End-to-end architecture diagram"></svg></div>
+<h3>How to read it</h3>
+<ul>
+<li><b>Zone 1.</b> An operator uploads a PDF or a manifest. Docling parses it into chunks, which are validated, embedded and written to Qdrant. The manifest also feeds BM25.</li>
+<li><b>Zone 2.</b> Qdrant, the manifests, the catalog and Redis are shared. Ingestion writes them. The online path reads them.</li>
+<li><b>Zone 3.</b> A chat request is limited, checked, planned, cache-checked, searched, reranked, answered and verified. The path runs down the left column, then up the right.</li>
+<li><b>Zone 4.</b> The evaluation runner calls the same live pipeline, stores the samples and scores them with RAGAS.</li>
+</ul>
+<script>
+(function(){
+var C={b:'#2563eb',p:'#7c3aed',g:'#059669',o:'#d97706'},S='',N={};
+S+='<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8a8a84"/></marker></defs>';
+[[20,20,700,300,'1  ADMIN INGESTION AND INDEXING','offline, run by an operator','b'],[20,350,700,160,'2  SHARED STORES','written by ingestion, read at query time','p'],[760,20,620,700,'3  ONLINE QUESTION ANSWERING','one chat request: down the left, up the right','g'],[20,750,1360,240,'4  OFFLINE EVALUATION','RAGAS on a fixed question set','o']].forEach(function(z){var c=C[z[6]];
+S+='<rect x="'+z[0]+'" y="'+z[1]+'" width="'+z[2]+'" height="'+z[3]+'" rx="18" fill="'+c+'" fill-opacity=".07" stroke="'+c+'" stroke-width="1.5"/><text x="'+(z[0]+20)+'" y="'+(z[1]+26)+'" font-size="15" font-weight="700" fill="'+c+'">'+z[4]+'</text><text x="'+(z[0]+20)+'" y="'+(z[1]+43)+'" font-size="11" style="fill:var(--muted)">'+z[5]+'</text>';});
+function nd(id,x,y,w,h,t,s,z,ext){N[id]={x:x,y:y,w:w,h:h};var c=C[z],cx=x+w/2;
+S+='<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="10" style="fill:var(--panel)" stroke="'+c+'" stroke-width="1.6"'+(ext?' stroke-dasharray="5 3"':'')+'/><text x="'+cx+'" y="'+(y+22)+'" text-anchor="middle" font-size="13" font-weight="700" style="fill:var(--text)">'+t+'</text>';
+s.split('|').forEach(function(l,i){S+='<text x="'+cx+'" y="'+(y+40+i*14)+'" text-anchor="middle" font-size="11" style="fill:var(--muted)">'+l+'</text>';});}
+function pt(n,s){n=N[n];return s=='r'?[n.x+n.w,n.y+n.h/2]:s=='l'?[n.x,n.y+n.h/2]:s=='t'?[n.x+n.w/2,n.y]:[n.x+n.w/2,n.y+n.h];}
+function raw(d,dash,w){S+='<path d="'+d+'" fill="none" stroke="#8a8a84" stroke-width="'+(w||1.8)+'"'+(dash?' stroke-dasharray="6 4"':'')+' marker-end="url(#ah)"/>';}
+function ar(a,s1,b,s2,dash){var p=pt(a,s1),q=pt(b,s2),h1=s1=='r'||s1=='l',h2=s2=='r'||s2=='l',d;
+if(h1&&h2){var m=(p[0]+q[0])/2;d='M'+p+' H'+m+' V'+q[1]+' H'+q[0];}else if(!h1&&!h2){var m=(p[1]+q[1])/2;d='M'+p+' V'+m+' H'+q[0]+' V'+q[1];}else if(h1){d='M'+p+' H'+q[0]+' V'+q[1];}else{d='M'+p+' V'+q[1]+' H'+q[0];}raw(d,dash);}
+nd('a1',40,80,150,64,'Admin UI','Streamlit, two logins|PDF or manifest upload','b');
+nd('a2',205,80,150,64,'Docling parse','TableFormer accurate|OCR for scanned pages','b');
+nd('a3',370,80,150,64,'Chunker','≤500 tokens per chunk|table rows as facts','b');
+nd('a4',535,80,150,64,'Artifacts','Manifest, quality report|markdown, Docling JSON','b');
+nd('a5',535,200,150,64,'Validate manifest','Array of objects|IDs and types checked','b');
+nd('a6',370,200,150,64,'Embed','BGE-small, batch 32|384 dimensions','b');
+nd('a7',205,200,150,64,'Seed Qdrant','UUID5 point IDs|stale chunks removed','b');
+ar('a1','r','a2','l');ar('a2','r','a3','l');ar('a3','r','a4','l');ar('a4','b','a5','t');ar('a5','l','a6','l');ar('a6','l','a7','r');
+nd('qd',40,414,150,70,'Qdrant','Remote, 384-d cosine|5 payload indexes','p');
+nd('mf',210,414,150,70,'Manifests','JSON chunk files|BM25 built at start','p');
+nd('ct',380,414,150,70,'Catalog','Built from Qdrant|refresh every 300 s','p');
+nd('rd',550,414,150,70,'Redis','Answer cache, limits|distributed RAG queue','p');
+ar('a7','b','qd','t');raw('M610 264 V337 H285 V414');
+var L=[['u1','Chat user → React UI','Answer and source passages'],['u2','Nginx edge','HTTPS, size caps, headers'],['u3','FastAPI boundary','Signed session, rate limits|RAG queue, 80 s deadline'],['u4','Policy checks','Intent classifier, PII masking|Injection and policy rails'],['u5','Query planner','Groq JSON plus rules, catalog|Intent, companies, years, metrics'],['u6','Answer cache','L1 exact, L2 semantic|A hit returns at once']];
+L.forEach(function(r,i){nd(r[0],780,70+i*80,270,64,r[1],r[2],'g');if(i)ar(L[i-1][0],'b',r[0],'t');});
+var R=[['v1','Hybrid search','Qdrant dense + BM25 in parallel|Strict filters, relaxed if under 5 hits'],['v2','RRF fusion','Per-company buckets|Quota per company, then leftovers'],['v3','Rerank','Voyage rerank-3-lite|Falls back to fused order'],['v4','Context pack','4,096 token budget|[S1], [S2] source tags'],['v5','Answer','Groq gpt-oss-20b, temperature 0|Evidence-only prompt'],['v6','Output rails','Prompt leak, PII, numeric check|One strict retry on numbers'],['v7','Answer + sources','State, chunks, source map|Cache written in background']];
+R.forEach(function(r,i){nd(r[0],1090,590-i*80,270,64,r[1],r[2],'g',i==2||i==4);if(i)ar(R[i-1][0],'t',r[0],'b');});
+ar('u6','r','v1','l');ar('v7','l','u1','r');
+raw('M722 449 H756',true,3);S+='<text x="739" y="440" text-anchor="middle" font-size="10" style="fill:var(--muted)">reads</text>';
+nd('e1',40,800,190,70,'Question set','Questions + reference answers','o');
+nd('e2',260,800,190,70,'Runner','Load, validate|Run live pipeline, 2 at a time','o');
+nd('e3',480,800,190,70,'Sample cache','Answers + up to 5 contexts|1,500 characters each','o');
+nd('e4',700,800,190,70,'RAGAS scoring','Four metrics per question','o');
+nd('e5',920,800,190,70,'CSV report','Per-question scores|Plus a summary','o');
+nd('e6',1140,800,220,110,'Judge layer','Groq-hosted judge models|Key and model failover|BGE-small embeddings','o',true);
+ar('e1','r','e2','l');ar('e2','r','e3','l');ar('e3','r','e4','l');ar('e4','r','e5','l');
+raw('M1250 800 V782 H795 V800',true);raw('M355 800 V735 H1225 V720',true);
+S+='<text x="790" y="729" text-anchor="middle" font-size="10" style="fill:var(--muted)">evaluation calls the live pipeline</text>';
+[['Context precision','0.913'],['Context recall','1.000'],['Faithfulness','0.870'],['Answer relevancy','0.973']].forEach(function(m,i){var x=40+i*270;S+='<rect x="'+x+'" y="905" width="250" height="56" rx="10" style="fill:var(--panel)" stroke="'+C.o+'"/><text x="'+(x+16)+'" y="929" font-size="12" style="fill:var(--muted)">'+m[0]+'</text><text x="'+(x+16)+'" y="951" font-size="20" font-weight="700" style="fill:var(--acc)">'+m[1]+'</text>';});
+S+='<text x="1140" y="940" font-size="12" style="fill:var(--muted)">Mean of 25 scored questions</text>';
+S+='<text x="20" y="1018" font-size="11" style="fill:var(--muted)">Solid box: internal component. Dashed box: external service. Dashed arrow: read or run link. Reranking uses Voyage AI. Generation and judging use Groq.</text>';
+document.getElementById('bp').innerHTML=S;
+})();
+</script>
+</section>
+
+<section id="sysmap">
+<h2>Full system map</h2>
+<p>Every component, grouped by layer. Amber boxes are external services. Green boxes are data stores.</p>
+<div class="map">
+<div class="lane"><b>Users</b><div><div class="box">Browser<small>React 19 + TypeScript, chat state in memory only</small></div><div class="box">Operator<small>admin login</small></div></div></div>
+<div class="dn">HTTPS 443 ▾</div>
+<div class="lane"><b>Edge</b><div><div class="box a">Nginx<small>TLS, headers, size caps, admin rate limit, serves React build</small></div></div></div>
+<div class="dn">/v1/chat, /health ▾ &nbsp;&nbsp; /admin ▾</div>
+<div class="lane"><b>Boundary</b><div><div class="box">FastAPI<small>signed session cookie</small></div><span class="ar">→</span><div class="box">Rate limiter<small>session + IP, Redis Lua</small></div><span class="ar">→</span><div class="box">Validation<small>ChatRequest</small></div><span class="ar">→</span><div class="box">Readiness<small>503 if warming</small></div><span class="ar">→</span><div class="box">RAG queue<small>Redis FIFO lease</small></div><span class="ar">→</span><div class="box">80 s deadline</div></div></div>
+<div class="dn">▾</div>
+<div class="lane"><b>Policy</b><div><div class="box">Intent classifier<small>BGE embeddings</small></div><span class="ar">→</span><div class="box">NeMo input rails<small>PII → heuristics → policy</small></div><span class="ar">→</span><div class="box">Query planner<small>Groq JSON + rules</small></div></div></div>
+<div class="dn">▾</div>
+<div class="lane"><b>Retrieval</b><div><div class="box">Catalog<small>5 min TTL</small></div><span class="ar">→</span><div class="box a">Answer cache L1/L2</div><span class="ar">→</span><div class="box a">Qdrant dense</div><div class="box a">BM25 lexical</div><span class="ar">→</span><div class="box a">RRF + entity buckets</div><span class="ar">→</span><div class="box a">Reranker</div><span class="ar">→</span><div class="box">Context pack<small>4,096 tokens</small></div></div></div>
+<div class="dn">▾</div>
+<div class="lane"><b>Answer</b><div><div class="box a">Groq answer<small>temp 0</small></div><span class="ar">→</span><div class="box">Output rails<small>leak → PII → numbers</small></div><span class="ar">⇢</span><div class="box">Strict retry<small>once</small></div><span class="ar">→</span><div class="box">Completeness check</div><span class="ar">→</span><div class="box">Response + async cache write</div></div></div>
+<div class="lane"><b>External</b><div><div class="box r">Groq<small>gpt-oss-20b</small></div><div class="box r">Voyage AI<small>rerank-3-lite</small></div><div class="box r">Qdrant<small>remote</small></div><div class="box r">Logfire<small>traces</small></div></div></div>
+<div class="lane"><b>Stores</b><div><div class="box g">Redis<small>cache, limits, queue</small></div><div class="box g">Qdrant collection<small>384-d cosine</small></div><div class="box g">JSON manifests<small>BM25 source</small></div><div class="box g">Named volumes<small>Redis data, uploads, models</small></div></div></div>
+<div class="lane"><b>Admin</b><div><div class="box">Streamlit<small>/admin</small></div><span class="ar">→</span><div class="box">Docling parse + chunk</div><span class="ar">→</span><div class="box g">Manifests</div><span class="ar">+</span><div class="box g">Seed Qdrant</div></div></div>
+</div>
+</section>
+
+<section id="lifecycle">
+<h2>Request lifecycle, stage by stage</h2>
+<p>One chat request passes through these stages in order. Early stages can end the request.</p>
+<div class="tw"><table>
+<tr><th>#</th><th>Stage</th><th>What happens</th><th>Failure or exit</th></tr>
+<tr><td>0</td><td>Boundary</td><td>Verify or set the session cookie. Run the Redis rate limiter. Validate the request. Check readiness. Wait for a queue lease. Start the pipeline under the remaining deadline.</td><td>429 limit or queue, 503 not ready or Redis, 504 deadline, 500 unexpected.</td></tr>
+<tr><td>1</td><td>Intent fast path</td><td>Embed the query and classify it. Only <code>smalltalk</code> and <code>out_of_scope</code> may short-circuit, and only if PII masking would not change the text. Without the classifier, an anchored greeting pattern allows a greeting shortcut.</td><td>Greeting reply or scope refusal.</td></tr>
+<tr><td>2</td><td>Input rails</td><td>Mask PII and secrets. Run length and injection rules. Run the Groq policy check. Mask all prior turns. A blocked query is masked again before it reaches traces.</td><td>Refusal. Fail closed if both Groq keys fail.</td></tr>
+<tr><td>3</td><td>Catalog and planning</td><td>Refresh the catalog if older than 300 s. Build the plan from the safe query, masked history, state and company names.</td><td>Router failure gives a rule-based default plan.</td></tr>
+<tr><td>4</td><td>Non-search intents</td><td><code>out_of_scope</code> gives a fixed message. <code>general_chat</code> gives a short reply. <code>chat_summary</code> summarises supplied history. None are cached.</td><td>Free-text output rails apply.</td></tr>
+<tr><td>5</td><td>Cache lookup</td><td>Build the cache scope. Try L1 exact, then L2 semantic for non-elaboration queries.</td><td>Hit returns at once. Errors count as a miss.</td></tr>
+<tr><td>6</td><td>Document resolution</td><td>Pick document IDs per company. A session document ID wins for single-company questions. Build ID and year filters.</td><td>Unknown company is skipped and noted. No documents at all gives a not-found reply.</td></tr>
+<tr><td>7</td><td>Hybrid search</td><td>Per subquery, under the search semaphore, run Qdrant and BM25 in parallel. If fewer than 5 distinct chunks, repeat without year and company filters.</td><td>BM25 error gives an empty ranking. Qdrant error gives 503.</td></tr>
+<tr><td>8</td><td>Fusion</td><td>Bucket by company. Score each chunk by summed <code>1/(60+rank)</code>. Take a quota per company, then fill from the best leftovers.</td><td>None.</td></tr>
+<tr><td>9</td><td>Rerank</td><td>Send passages with metadata to Voyage. Single company: one call. Several: one call per company, interleaved round-robin. At least 3 chunks per company.</td><td>Failure or timeout keeps the fused order.</td></tr>
+<tr><td>10</td><td>Context packing</td><td>Drop empty chunks. Tag sources <code>[S1]</code>, <code>[S2]</code>. Count tokens. Skip any chunk that would pass 4,096 but keep trying smaller ones.</td><td>Nothing usable gives a no-support reply.</td></tr>
+<tr><td>11</td><td>Generate and verify</td><td>Answer at temperature 0. Run output rails. One strict retry on a numeric block. Check every company is covered. Build the response. Write the cache in the background.</td><td>Still blocked gives a refusal and no cache.</td></tr>
+</table></div>
+<h3>Response contents</h3>
+<ul>
+<li>Answer text, normalised intent and the standalone search query.</li>
+<li>Updated session state: company, fiscal year, target metric, document ID.</li>
+<li>Retrieved chunks with ID, text, document, file, page, type, headings, fusion score and reranker score.</li>
+<li>A source map from tags to file, page and section.</li>
+</ul>
+<h3>Startup and shutdown</h3>
+<ol class="st">
+<li>Observability is set up for FastAPI and outbound HTTP.</li>
+<li>Warmups run concurrently: Qdrant embeddings, BM25 load, reranker client, cache index, guardrails, PII engine, intent examples, Groq clients.</li>
+<li>A forced catalog refresh runs.</li>
+<li>Only then is the service marked ready. A required warmup failure stops startup. Cache and intent warmup failures degrade quietly.</li>
+</ol>
+</section>
+
+<section id="data">
+<h2>Data</h2>
+<p>The corpus is financial filings, parsed into chunks. Chunks live in two places that must stay in step.</p>
+<div class="tw"><table>
+<tr><th>Store</th><th>Holds</th><th>Used for</th></tr>
+<tr><td>Qdrant collection <code>financial_rag_analytics</code></td><td>Vectors and payloads. Named vector size 384, cosine distance.</td><td>Dense search and the document catalog.</td></tr>
+<tr><td>Local JSON manifests</td><td>Chunk text and metadata.</td><td>BM25 index, loaded into memory at start.</td></tr>
+<tr><td>Redis</td><td>Cached answers, rate counters, queue state.</td><td>Speed and overload control.</td></tr>
+</table></div>
+<h3>Document catalog</h3>
+<ul>
+<li>Built from Qdrant payloads, grouped by document and source file.</li>
+<li>Refreshed every 300 seconds, and once at startup.</li>
+<li>Falls back to BM25 chunks if Qdrant returns no rows.</li>
+<li>A corpus fingerprint from document IDs and chunk counts scopes the cache.</li>
+</ul>
+</section>
+
+<section id="ingestion">
+<h2>Ingestion pipeline</h2>
+<p>A separate Streamlit admin tool handles ingestion. It is protected by two logins.</p>
+<ol>
+<li>Parse PDFs with Docling, or accept existing manifests.</li>
+<li>Write chunk manifests to the shared manifest folder.</li>
+<li>Seed the configured Qdrant collection with named-vector embeddings.</li>
+</ol>
+<h3>Chunk metadata used at search time</h3>
+<ul>
+<li>Document ID, file name, company and fiscal years.</li>
+<li>Page, section headings and chunk type.</li>
+<li>Financial metric, table columns and row labels, which help BM25 and reranking match table content.</li>
+</ul>
+<div class="note">The admin tool and the API must point at the same Qdrant collection and vector name, and see the same manifest folder.</div>
+</section>
+
+<section id="retrieval">
+<h2>Retrieval</h2>
+<div class="tw"><table>
+<tr><th>Stage</th><th>Detail</th></tr>
+<tr><td>Query planning</td><td>Groq JSON mode returns intent, follow-up type, companies, metrics, years and a standalone query. Rules then clean and fill gaps.</td></tr>
+<tr><td>Dense search</td><td><code>BAAI/bge-small-en-v1.5</code> query embedding, run locally. Qdrant named-vector search with top-k 30.</td></tr>
+<tr><td>Lexical search</td><td>BM25 over local manifests. Keeps digits, percentages and hyphenated filing terms.</td></tr>
+<tr><td>Filters</td><td>Document IDs, company and fiscal year. Missing year or company fields are not excluded.</td></tr>
+<tr><td>Filter relaxing</td><td>If fewer than 5 distinct chunks are found, search again without year and company filters. Document IDs stay.</td></tr>
+<tr><td>Fusion</td><td>Reciprocal rank fusion, <code>1 / (60 + rank)</code>, within each company bucket. Quotas, then leftovers.</td></tr>
+<tr><td>Reranking</td><td>Voyage <code>rerank-3-lite</code>. Passages carry company, section, metric, years and row labels. Multi-company questions rerank per company and interleave.</td></tr>
+<tr><td>Fallback</td><td>If Voyage fails or times out, the fused order is kept.</td></tr>
+</table></div>
+<h3>Follow-up types</h3>
+<div class="tw"><table>
+<tr><th>Type</th><th>Behaviour</th></tr>
+<tr><td>none</td><td>Standalone question.</td></tr>
+<tr><td>reference</td><td>Uses a rewritten standalone query with carried company, year and metric.</td></tr>
+<tr><td>elaboration</td><td>Adds extra search aspects, widens candidates, includes recent history and skips the semantic cache.</td></tr>
+</table></div>
+<p>Multi-company questions get at least three final chunks per company. Session state is returned to the client, which sends it back on the next turn. The server stores none.</p>
+</section>
+
+<section id="generation">
+<h2>Answer generation</h2>
+<h3>Prompt and context</h3>
+<ul>
+<li>Model: Groq <code>openai/gpt-oss-20b</code>, temperature 0.</li>
+<li>The prompt requires evidence-only answers, exact values and units, citations, and a clear note when data is missing.</li>
+<li>Evidence is packed in rank order up to 4,096 tokens. Each source gets a tag such as <code>[S1]</code> and a source map.</li>
+</ul>
+<h3>Hallucination controls</h3>
+<div class="tw"><table>
+<tr><th>Check</th><th>Rule</th></tr>
+<tr><td>Prompt leak</td><td>Blocks answers that expose internal instructions.</td></tr>
+<tr><td>Output PII</td><td>Masks sensitive entities and secrets.</td></tr>
+<tr><td>Numeric grounding</td><td>Compares figures with the evidence. Allows ×1,000 and ×1,000,000 scaling with 1% tolerance. Blocks if more than half cannot be matched.</td></tr>
+<tr><td>Strict retry</td><td>A numeric block on the first try triggers one retry with a stricter prompt. Other blocks do not retry.</td></tr>
+<tr><td>Completeness</td><td>Every requested company must appear in the evidence. Otherwise a note is added and the answer is not cached.</td></tr>
+</table></div>
+<h3>Cache</h3>
+<ul>
+<li>L1 exact: Redis key from scope and normalised query.</li>
+<li>L2 semantic: RedisVL, nearest match only. Cosine distance at most 0.04, term overlap at least 0.7, and matching numbers.</li>
+<li>Scope: intent, companies, years, document IDs and corpus version.</li>
+<li>Only complete, passing answers are stored, in the background.</li>
+</ul>
+<h3>LLM retries</h3>
+<p>Up to 4 attempts, with at most 25 seconds of total waiting. Rate limits rotate to a second key if one is set.</p>
+</section>
+
+<section id="admin">
+<h2>Admin and ingestion in depth</h2>
+<p>The admin tool is a Streamlit app served under <code>/admin</code>. It is the only way documents enter the system.</p>
+<div class="flow">
+<div class="box">Operator login<small>Nginx Basic Auth + app login</small></div><span class="ar">→</span>
+<div class="box">Upload PDFs<small>up to 32 MiB per request</small></div><span class="ar">→</span>
+<div class="box a">Docling<small>parse and chunk</small></div><span class="ar">→</span>
+<div class="box g">JSON manifests<small>shared folder</small></div><span class="ar">→</span>
+<div class="box g">Seed Qdrant<small>configured collection</small></div><span class="ar">→</span>
+<div class="box">API picks up</div>
+</div>
+<h3>What each step does</h3>
+<ol class="st">
+<li><b>Access.</b> Nginx asks for Basic Auth from a mounted password file. The app then asks for its own username and password. XSRF protection is on. WebSocket upgrade headers are forwarded and buffering is off.</li>
+<li><b>Input.</b> The operator uploads PDFs, or points to manifests that already exist. Uploads sit in a named volume.</li>
+<li><b>Parse.</b> Docling parses the PDF and chunks it. Tables and headings are kept as metadata such as columns and row labels.</li>
+<li><b>Manifest.</b> Chunks are written as JSON arrays into the shared manifest folder. The API and admin containers both mount it.</li>
+<li><b>Seed.</b> Chunks are embedded and loaded into the configured Qdrant collection with the configured named vector. The remote Qdrant URL and key are required.</li>
+<li><b>Pick-up.</b> The API sees new documents in its catalog within 5 minutes. BM25 does not reload until the API restarts.</li>
+</ol>
+<h3>Rules the two sides must share</h3>
+<div class="tw"><table>
+<tr><th>Item</th><th>Must match</th></tr>
+<tr><td>Collection name</td><td><code>financial_rag_analytics</code> on both sides</td></tr>
+<tr><td>Named vector</td><td><code>fastembed-BAAI-bge-small-en-v1-5</code>, size 384, cosine</td></tr>
+<tr><td>Manifest folder</td><td>Same files visible to API and admin</td></tr>
+<tr><td>Qdrant deployment</td><td>Same remote instance</td></tr>
+</table></div>
+<h3>BM25 manifest loading</h3>
+<ul>
+<li>Reads JSON files from the manifest folder first. If none, scans the data folder, except the metadata subfolder.</li>
+<li>Skips files that start with <code>old_</code>, contain <code>_old</code> or <code>cache</code> or <code>evaluation</code>, or end in <code>.bak</code>.</li>
+<li>Accepts only JSON arrays. Drops empty chunks and sentinel values.</li>
+<li>Indexes searchable text built from document, file, company, years, metric, headings, columns, row labels, embedding text and content.</li>
+</ul>
+<h3>Admin edge limits</h3>
+<ul>
+<li>5 requests per second per client, burst 10, no delay. Static admin assets are excluded.</li>
+<li>20 connections per client. Read timeout 300 s.</li>
+<li>Admin container: 3 GiB memory.</li>
+</ul>
+</section>
+
+<section id="parsing">
+<h2>PDF parsing and chunking in depth</h2>
+<p>Parsing is done offline by Docling. The goal is table-aware chunks that fit the embedding model without losing text.</p>
+<div class="flow">
+<div class="box">PDF</div><span class="ar">→</span>
+<div class="box a">Docling convert<small>TableFormer ACCURATE, cell matching, no OCR</small></div><span class="ar">→</span>
+<div class="box">&gt;20% pages empty?<small>scan check</small></div><span class="ar">yes →</span>
+<div class="box a">Re-convert with OCR</div><span class="ar">→</span>
+<div class="box">Walk document order<small>text, tables, headings</small></div><span class="ar">→</span>
+<div class="box a">Text chunks + table fact chunks</div><span class="ar">→</span>
+<div class="box g">Manifest + quality report</div>
+</div>
+<h3>Conversion</h3>
+<ul>
+<li>PDF only. Device is auto, CPU, CUDA or MPS. Four threads.</li>
+<li>OCR mode <code>auto</code> first converts without OCR. If more than 20% of pages have no content, it converts again with OCR. If OCR fails, the first result is kept.</li>
+<li>Modes <code>on</code> and <code>off</code> force the choice.</li>
+</ul>
+<h3>Token budget</h3>
+<ul>
+<li>Embedding text is capped at 500 tokens, under the 512 limit of BGE-small.</li>
+<li>Room is reserved for the <code>Document / Page / Section</code> prefix added to every chunk.</li>
+<li>Text is never cut. Oversized text is split in order: lines, then sentences, then words, then raw token slices.</li>
+<li>Text chunking uses Docling's hybrid chunker with peer merging off.</li>
+</ul>
+<h3>Table handling</h3>
+<div class="tw"><table>
+<tr><th>Problem in filings</th><th>How it is handled</th></tr>
+<tr><td>Spanning or multi-row headers</td><td>Joined into one column label such as a year-ended date.</td></tr>
+<tr><td><code>$</code>, <code>)</code> and <code>%</code> in their own cells</td><td>Merged back with the number.</td></tr>
+<tr><td>Row labels wrapped over several cells</td><td>Merged in reading order using cell positions.</td></tr>
+<tr><td>Section rows such as "Revenues:"</td><td>Carried as a row group on the rows beneath.</td></tr>
+<tr><td>Rows with values but no label</td><td>Kept, flagged as unlabeled, never dropped.</td></tr>
+<tr><td>Unusable grid</td><td>Falls back to a markdown rendering of the table.</td></tr>
+</table></div>
+<p>Each table yields table chunks and one <b>fact chunk per row</b>. Wide rows are split into numbered parts. The lead-in sentence before a table (short, or ending in a colon) is attached for context.</p>
+<h3>Chunk metadata</h3>
+<div class="tw"><table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>chunk ID</td><td>First 16 hex characters of a SHA-256 over document, position and text.</td></tr>
+<tr><td>chunk type, page, headings, caption</td><td>Position and section context.</td></tr>
+<tr><td>columns, row labels, table block index</td><td>Table structure. Feeds BM25 and reranking.</td></tr>
+<tr><td>financial metric, row group</td><td>The row label and its section.</td></tr>
+<tr><td>values by column</td><td>Column name to value for that fact.</td></tr>
+<tr><td>fiscal years, fiscal year</td><td>Years found in column labels. The single year is the latest one.</td></tr>
+<tr><td>fact part and parts, parent chunk ID</td><td>Links split facts to their table.</td></tr>
+</table></div>
+<h3>Noise filters</h3>
+<p>Chunks with fewer than 35 characters or 6 words are dropped. Phone numbers, employer ID lines, executive-office lines and checkbox glyphs are treated as boilerplate. Adjacent short text fragments are merged.</p>
+<h3>Outputs per document</h3>
+<div class="tw"><table>
+<tr><th>Output</th><th>Use</th></tr>
+<tr><td>Chunk manifest (JSON array)</td><td>BM25 index and Qdrant seeding.</td></tr>
+<tr><td>Document markdown</td><td>Human review.</td></tr>
+<tr><td>Quality report</td><td>Pages, empty pages, OCR used, chunks by type, max embedding tokens, chunks over budget, fallback and missed table pages, samples of unlabeled rows.</td></tr>
+<tr><td>Lossless Docling JSON</td><td>Re-chunk later without parsing the PDF again.</td></tr>
+</table></div>
+<p>Reports and Docling JSON go to a metadata subfolder, which BM25 loading skips.</p>
+</section>
+
+<section id="seeding">
+<h2>Seeding Qdrant in depth</h2>
+<div class="flow">
+<div class="box">Manifest JSON</div><span class="ar">→</span>
+<div class="box">Validate</div><span class="ar">→</span>
+<div class="box a">Collection exists?<small>create if not</small></div><span class="ar">→</span>
+<div class="box">Payload indexes</div><span class="ar">→</span>
+<div class="box a">Embed, batch 32</div><span class="ar">→</span>
+<div class="box">Build points</div><span class="ar">→</span>
+<div class="box g">Upsert</div><span class="ar">→</span>
+<div class="box">Delete orphans</div>
+</div>
+<h3>Steps</h3>
+<ol class="st">
+<li><b>Validate.</b> The manifest must be a JSON array of objects. Text fields must be strings, document and chunk IDs must not be empty, and metadata must be an object.</li>
+<li><b>Connect.</b> Remote Qdrant when a URL is set, otherwise local storage.</li>
+<li><b>Collection.</b> Created if missing, with the named vector at 384 dimensions and cosine distance.</li>
+<li><b>Indexes.</b> Keyword indexes on document ID, chunk type and company. Integer indexes on fiscal year and fiscal years.</li>
+<li><b>Embed.</b> FastEmbed BGE-small on the embedding text, falling back to content. Batch size 32.</li>
+<li><b>Points.</b> The point ID is a UUID5 of document ID and chunk ID. Re-indexing the same document therefore overwrites, not duplicates.</li>
+<li><b>Upsert.</b> All points are sent in one call.</li>
+<li><b>Clean up.</b> For each document, points that are not in the new set are deleted. This removes stale chunks after a re-parse.</li>
+</ol>
+<h3>Payload stored with each vector</h3>
+<p>Chunk ID, document ID, source file, content, embedding text, page, fiscal year and years, headings, chunk type, columns, row labels, financial metric, table caption, row group, company and the full metadata object.</p>
+<h3>Inference fallbacks</h3>
+<ul>
+<li>Company: taken from the chunk, then from metadata, then inferred from the document ID for known names.</li>
+<li>Fiscal year: taken from the chunk or metadata, then inferred from a 20xx year in the document ID or file name.</li>
+</ul>
+<h3>Admin screen</h3>
+<div class="tw"><table>
+<tr><th>Control</th><th>Behaviour</th></tr>
+<tr><td>Tab 1: upload and parse</td><td>Accepts several PDFs. Each file gets a document ID from its cleaned name plus 16 hex characters of its content hash. Two buttons: parse, then index.</td></tr>
+<tr><td>Tab 2: existing manifest</td><td>Seeds from a manifest you already have, with a document ID you confirm.</td></tr>
+<tr><td>Recreate collection</td><td>Off by default. Needs a second confirmation. Deletes every document, not only the uploaded one.</td></tr>
+<tr><td>Guards</td><td>Indexing is blocked until the file is parsed and the manifest exists.</td></tr>
+</table></div>
+</section>
+
+<section id="evaluation">
+<h2>Evaluation</h2>
+<p>Answers are scored with RAGAS on a fixed question set. The run calls the real pipeline, so retrieval, guardrails and generation are all in the loop.</p>
+<div class="cards">
+<div class="card"><b>0.913</b><span>Context precision</span></div>
+<div class="card"><b>1.000</b><span>Context recall</span></div>
+<div class="card"><b>0.870</b><span>Faithfulness</span></div>
+<div class="card"><b>0.973</b><span>Answer relevancy</span></div>
+<div class="card"><b>25</b><span>Questions scored, 0 problems</span></div>
+</div>
+<h3>Method</h3>
+<ol class="st">
+<li>Load the question set. Each item has a question and a reference answer.</li>
+<li>Run each question through the live pipeline, two at a time.</li>
+<li>Keep up to 5 retrieved contexts, each cut to 1,500 characters. Cache these samples so scoring can be repeated.</li>
+<li>Score four metrics with a Groq-hosted judge. Calls fail over across keys and across two judge models, and back off on rate limits.</li>
+<li>Answer relevancy uses BGE-small embeddings. Results go to a per-question CSV and a summary.</li>
+</ol>
+<p>Pass the refresh option to re-run the pipeline instead of using cached samples.</p>
+<h3>Metrics</h3>
+<div class="tw"><table>
+<tr><th>Metric</th><th>Mean</th><th>Lowest</th><th>Reads as</th></tr>
+<tr><td>Context precision</td><td>0.913</td><td>0.25</td><td>Relevant chunks rank high.</td></tr>
+<tr><td>Context recall</td><td>1.000</td><td>1.00</td><td>The needed evidence was always retrieved.</td></tr>
+<tr><td>Faithfulness</td><td>0.870</td><td>0.00</td><td>Answer claims are supported by context.</td></tr>
+<tr><td>Answer relevancy</td><td>0.973</td><td>0.92</td><td>Answers address the question.</td></tr>
+</table></div>
+<h3>Weak spots</h3>
+<ul>
+<li>Faithfulness is below 0.9 on 7 of 25 questions. The lowest are q017 (0.00), q016 (0.40) and q021 (0.60).</li>
+<li>Context precision is below 0.9 on 5 questions. The lowest are q022 (0.25) and q020 (0.42).</li>
+<li>Retrieval finds the evidence every time. The gaps are ranking noise and answer wording, not missing data.</li>
+</ul>
+<div class="note">25 questions is a small set. Treat these scores as a regression baseline, not a production accuracy claim.</div>
+</section>
+
+<section id="planner">
+<h2>Query planner and session state</h2>
+<h3>Inputs</h3>
+<ul>
+<li>The masked, safe query.</li>
+<li>Up to the last 4 turns, within a 6-turn bound. History is capped at 12 messages of 2,000 characters. Assistant turns are cut to 600 characters for the router.</li>
+<li>Current state, known company names, and the embedding-router hint.</li>
+</ul>
+<h3>Router output (Groq JSON mode)</h3>
+<div class="tw"><table>
+<tr><th>Field</th><th>Values</th></tr>
+<tr><td>intent</td><td><code>rag_search</code>, <code>chat_summary</code>, <code>general_chat</code>, <code>out_of_scope</code></td></tr>
+<tr><td>follow-up type</td><td><code>none</code>, <code>reference</code>, <code>elaboration</code></td></tr>
+<tr><td>entities, metrics, years</td><td>Companies, topics, fiscal years</td></tr>
+<tr><td>search query</td><td>Standalone rewrite</td></tr>
+<tr><td>aspects</td><td>Up to 4 extra aspects for elaboration</td></tr>
+</table></div>
+<h3>Rule-based clean-up after the model</h3>
+<ul>
+<li>Company names are lowercased, tokenised and stripped of suffixes such as Inc, Corp, Ltd and Company, then matched to the catalog.</li>
+<li>A separate detector finds indexed companies named in the query.</li>
+<li>Years: the pattern accepts 2010–2039. Model years are accepted from 1990–2100. With no year, the state year may be used.</li>
+<li>With no model metrics, verbs, years and company names are stripped to get a metric phrase. A follow-up may reuse the earlier metric.</li>
+<li>Subqueries are capped at 12. Default elaboration aspects: segment, product or region breakdown, drivers and management commentary, and year-over-year change.</li>
+</ul>
+<h3>Follow-up detection</h3>
+<p>There is no follow-up without history. A confident embedding hint and the model verdict are reconciled. Regex fallbacks apply only when the embedding router is off.</p>
+<h3>State rules</h3>
+<div class="tw"><table>
+<tr><th>Situation</th><th>State change</th></tr>
+<tr><td>Several companies</td><td>Single-company and document locks are cleared.</td></tr>
+<tr><td>One company</td><td>It becomes the company. The document ID stays only if the company is unchanged.</td></tr>
+<tr><td>No company found</td><td>Company and document carry forward.</td></tr>
+<tr><td>One year in the query</td><td>Fiscal year updates.</td></tr>
+<tr><td>Metric</td><td>Carried or updated from the model.</td></tr>
+</table></div>
+<p>The server stores no state. The client sends the returned state back each turn.</p>
+</section>
+
+<section id="cache">
+<h2>Cache in depth</h2>
+<div class="flow">
+<div class="box">Build scope</div><span class="ar">→</span>
+<div class="box a">L1 exact</div><span class="ar">hit →</span><div class="box">Return</div>
+<span class="ar">miss ↓</span>
+<div class="box a">L2 semantic<small>not for elaboration</small></div><span class="ar">valid →</span><div class="box">Promote to L1, return</div>
+<span class="ar">miss →</span><div class="box">Run full pipeline</div>
+</div>
+<div class="tw"><table>
+<tr><th>Part</th><th>Detail</th></tr>
+<tr><td>Scope</td><td>Intent, sorted companies or <code>global</code>, sorted years or <code>any</code>, document ID fingerprint, corpus version, and a prior-answer hash for elaboration.</td></tr>
+<tr><td>Corpus version</td><td>First 8 characters of SHA-1 over sorted <code>document_id:chunk_count</code> pairs.</td></tr>
+<tr><td>Cache text</td><td>Normal: the safe query. Reference: the rewritten standalone query. Elaboration: the query plus the prior answer hash.</td></tr>
+<tr><td>L1 key</td><td>SHA-256 of scope and lowercased alphanumeric query. Answer TTL 24 h. Greeting TTL 7 days.</td></tr>
+<tr><td>L2 index</td><td>RedisVL, 384-d BGE-small. Filters: company, year, document, intent, corpus. Nearest match only.</td></tr>
+<tr><td>L2 acceptance</td><td>Cosine distance at most 0.04. Term overlap at least 0.7. Number tokens must match.</td></tr>
+<tr><td>Writes</td><td>Only after passing checks and covering every requested company. Done in the background.</td></tr>
+<tr><td>Not cached</td><td>General chat, summaries, blocked or incomplete answers.</td></tr>
+</table></div>
+<div class="note">A cache hit returns the chunks but an empty source map.</div>
+</section>
+
+<section id="guardrails">
+<h2>Guardrails and PII in depth</h2>
+<h3>Input rails, in order</h3>
+<ol class="st">
+<li><b>Mask PII and secrets.</b> API-key patterns are always masked. Presidio with spaCy <code>en_core_web_sm</code> runs at score 0.4. Replacement goes right to left to keep offsets.</li>
+<li><b>Heuristics.</b> Reject empty text, text over 2,000 characters, and known injection phrases such as instruction override and system-prompt disclosure.</li>
+<li><b>Policy check.</b> A Groq self-check allows filing questions, follow-ups, greetings, capability questions and chat summaries. It blocks other work and investment advice.</li>
+</ol>
+<h3>Output rails, in order</h3>
+<ol class="st">
+<li><b>Prompt leak.</b> Blocks configured markers of internal instructions.</li>
+<li><b>PII mask.</b> Same entities, without phone numbers.</li>
+<li><b>Numeric grounding.</b> Pulls material numbers from the answer. Ignores citation tags and years 1900–2100. Matches against numbers in the evidence with ×1,000 and ×1,000,000 scaling and 1% tolerance. Blocks if more than half fail.</li>
+</ol>
+<p>The output rails are deterministic. They make no extra model call.</p>
+<h3>Failure modes</h3>
+<div class="tw"><table>
+<tr><th>Case</th><th>Behaviour</th></tr>
+<tr><td>Primary Groq key fails in the policy check</td><td>A second key is tried under the same policy.</td></tr>
+<tr><td>Both fail, default setting</td><td>Request is blocked with a temporary-unavailable refusal.</td></tr>
+<tr><td>Fail-open on</td><td>Only injection rules and PII masking run.</td></tr>
+<tr><td>Guardrails disabled</td><td>No masking either in the normal path.</td></tr>
+<tr><td>PII engine fails</td><td>Regex fallback for SSN, email, phone and Luhn-valid cards.</td></tr>
+<tr><td>Small-talk fast path</td><td>Skips the full input rails and the output rails.</td></tr>
+</table></div>
+<p>Specific refusal texts exist for empty, oversized, injection, prompt-leak and unverified-figure cases.</p>
+</section>
+
+<section id="rates">
+<h2>Rate limits, queue and overload</h2>
+<h3>Layers, outside in</h3>
+<div class="tw"><table>
+<tr><th>Layer</th><th>Limit</th><th>Result when exceeded</th></tr>
+<tr><td>Nginx body size</td><td>64 KiB general, 32 MiB admin</td><td>Request rejected</td></tr>
+<tr><td>Nginx connections</td><td>20 per client</td><td>Rejected</td></tr>
+<tr><td>Nginx admin rate</td><td>5/s, burst 10</td><td>Throttled</td></tr>
+<tr><td>Chat per session</td><td>20 per 60 s</td><td>429 with <code>Retry-After</code></td></tr>
+<tr><td>Chat per IP</td><td>60 per 60 s</td><td>429 with <code>Retry-After</code></td></tr>
+<tr><td>RAG concurrency</td><td>1 active across all API processes</td><td>Waits in queue</td></tr>
+<tr><td>Queue size</td><td>10 waiters</td><td>429, retry after 2 s</td></tr>
+<tr><td>Queue wait</td><td>15 s, polled every 0.25 s</td><td>429, retry after 2 s</td></tr>
+<tr><td>Request deadline</td><td>80 s including queue time</td><td>504</td></tr>
+</table></div>
+<h3>How the chat limiter works</h3>
+<ul>
+<li>One atomic Redis Lua script with fixed windows aligned to the clock.</li>
+<li>Both the session and IP counters must be under their limits. Rejected attempts add nothing.</li>
+<li>IPv6 is grouped by /64. Keys hold a SHA-256 digest of the session or IP.</li>
+<li>Nginx sets the real client address and overwrites forwarding headers.</li>
+<li>Headers returned: session limit and remaining, IP limit and remaining, and reset time.</li>
+<li>Redis failure fails closed with 503.</li>
+</ul>
+<h3>How the queue works</h3>
+<ul>
+<li>A Redis FIFO. A request leases an active slot for 60 s and renews it while work runs.</li>
+<li>If the deadline fires, the client gets 504 but the lease stays until the work finishes. This stops hidden overload.</li>
+<li>A separate in-process semaphore caps active search targets at 8.</li>
+</ul>
+<h3>Groq client limits</h3>
+<p>These are client-side retries. The provider quota is set by the Groq account, not by this project. Router calls time out at 20 s and answer calls at 30 s. Retries cover rate limits, connection errors and server errors, with up to 4 attempts and 25 s of total waiting. The wait follows the provider's retry hint when given, otherwise a bounded exponential delay with jitter.</p>
+</section>
+
+<section id="prompts">
+<h2>Prompts and models</h2>
+<h3>Prompts</h3>
+<p>Prompts are shared YAML files loaded at runtime by both the API and the admin side.</p>
+<div class="tw"><table>
+<tr><th>Prompt</th><th>Used by</th><th>Purpose</th></tr>
+<tr><td>Router</td><td>Query planner</td><td>Returns the planning fields as JSON.</td></tr>
+<tr><td>Chat</td><td>General chat, summary, small talk, answers</td><td>Short capability replies and history summaries. The answer prompt requires evidence-only answers, exact values and units, citations, and an explicit note on missing data.</td></tr>
+<tr><td>Strict answer</td><td>Numeric retry</td><td>Requires every figure to be quoted verbatim or shown as a simple calculation.</td></tr>
+<tr><td>Policy self-check</td><td>NeMo input rail</td><td>Asks whether to block the request, with in-scope and out-of-scope examples.</td></tr>
+<tr><td>Intent examples</td><td>Embedding classifier</td><td>Labelled examples for smalltalk, out-of-scope, elaboration, reference and summary.</td></tr>
+</table></div>
+<h3>Intent classifier</h3>
+<p>A label needs a cosine score of at least 0.85 and a lead of at least 0.03 over the runner-up. Only smalltalk and out-of-scope act directly. The other labels are hints for the planner.</p>
+<h3>Model inventory</h3>
+<div class="tw"><table>
+<tr><th>Model</th><th>Where it runs</th><th>Use</th></tr>
+<tr><td>openai/gpt-oss-20b</td><td>Groq</td><td>Planning, policy check, answers. Planning and policy models are set separately.</td></tr>
+<tr><td>BAAI/bge-small-en-v1.5</td><td>Local, FastEmbed</td><td>Query embeddings, semantic cache, intent classifier. 384 dimensions.</td></tr>
+<tr><td>rerank-3-lite</td><td>Voyage AI</td><td>Candidate reranking.</td></tr>
+<tr><td>en_core_web_sm</td><td>Local, spaCy</td><td>PII entity detection.</td></tr>
+<tr><td>Docling</td><td>Local, admin only</td><td>PDF parsing and chunking.</td></tr>
+</table></div>
+<p>No local generative model is used. Token counts use the <code>cl100k_base</code> estimate, or the provider counts when available. Reasoning effort for the model is optional.</p>
+</section>
+
+<section id="config">
+<h2>Configuration</h2>
+<p>Defaults live in shared settings. Environment variables override them.</p>
+<h3>Models and storage</h3>
+<div class="tw"><table>
+<tr><th>Setting</th><th>Default</th></tr>
+<tr><td><code>LLM_MODEL</code></td><td>openai/gpt-oss-20b</td></tr>
+<tr><td><code>GUARDRAIL_LLM_MODEL</code></td><td>openai/gpt-oss-20b</td></tr>
+<tr><td><code>EMBEDDING_MODEL</code></td><td>BAAI/bge-small-en-v1.5</td></tr>
+<tr><td><code>VECTOR_NAME</code></td><td>fastembed-BAAI-bge-small-en-v1-5</td></tr>
+<tr><td><code>COLLECTION_NAME</code></td><td>financial_rag_analytics</td></tr>
+<tr><td><code>RERANKER_MODEL</code></td><td>rerank-3-lite</td></tr>
+<tr><td><code>RERANKER_TIMEOUT_S</code></td><td>20</td></tr>
+</table></div>
+<h3>Retrieval and context</h3>
+<div class="tw"><table>
+<tr><th>Setting</th><th>Default</th><th>Effect</th></tr>
+<tr><td><code>RETRIEVAL_K</code></td><td>30</td><td>Top-k per retriever</td></tr>
+<tr><td><code>FINAL_TOP_K</code></td><td>5</td><td>Base final chunk count</td></tr>
+<tr><td><code>MAX_FINAL_TOP_K</code></td><td>10</td><td>Cap for multi-company selection</td></tr>
+<tr><td><code>RERANK_CANDIDATES</code></td><td>30</td><td>Candidates sent to rerank</td></tr>
+<tr><td><code>RRF_K</code></td><td>60</td><td>Fusion constant</td></tr>
+<tr><td><code>MIN_STRICT_YIELD</code></td><td>5</td><td>Threshold to relax filters</td></tr>
+<tr><td><code>MAX_CONTEXT_TOKENS</code></td><td>4096</td><td>Evidence budget</td></tr>
+<tr><td><code>MAX_HISTORY_TURNS</code></td><td>6</td><td>Router history bound</td></tr>
+<tr><td><code>CATALOG_TTL_S</code></td><td>300</td><td>Catalog refresh</td></tr>
+<tr><td><code>MAX_CONCURRENT_SEARCHES</code></td><td>8</td><td>Search semaphore</td></tr>
+<tr><td><code>REQUEST_TIMEOUT_S</code></td><td>80</td><td>Total deadline, includes queue wait</td></tr>
+</table></div>
+<h3>Cache, limits and queue</h3>
+<div class="tw"><table>
+<tr><th>Setting</th><th>Default</th></tr>
+<tr><td><code>CACHE_TTL</code></td><td>86,400 s</td></tr>
+<tr><td><code>CACHE_GREETING_TTL</code></td><td>604,800 s</td></tr>
+<tr><td><code>CACHE_MAX_DISTANCE</code></td><td>0.04</td></tr>
+<tr><td><code>CACHE_MIN_TERM_OVERLAP</code></td><td>0.7</td></tr>
+<tr><td><code>CHAT_SESSION_RATE_LIMIT_REQUESTS</code></td><td>20 per 60 s</td></tr>
+<tr><td><code>CHAT_IP_RATE_LIMIT_REQUESTS</code></td><td>60 per 60 s</td></tr>
+<tr><td><code>MAX_CONCURRENT_RAG</code></td><td>1</td></tr>
+<tr><td><code>MAX_QUEUE_WAITERS</code></td><td>10</td></tr>
+<tr><td><code>RAG_QUEUE_MAX_WAIT_SECONDS</code></td><td>15</td></tr>
+<tr><td><code>RAG_CONCURRENCY_LEASE_SECONDS</code></td><td>60</td></tr>
+</table></div>
+<h3>Guardrails, privacy and intent</h3>
+<div class="tw"><table>
+<tr><th>Setting</th><th>Default</th></tr>
+<tr><td><code>GUARDRAILS_ENABLED</code></td><td>true</td></tr>
+<tr><td><code>GUARDRAILS_TIMEOUT_S</code></td><td>15</td></tr>
+<tr><td><code>GUARDRAILS_FAIL_OPEN</code></td><td>false</td></tr>
+<tr><td><code>GUARDRAILS_NUMERIC_CHECK</code></td><td>true</td></tr>
+<tr><td><code>PII_ENGINE</code></td><td>presidio</td></tr>
+<tr><td><code>PII_SPACY_MODEL</code></td><td>en_core_web_sm</td></tr>
+<tr><td><code>PII_SCORE_THRESHOLD</code></td><td>0.4</td></tr>
+<tr><td><code>INTENT_ROUTER_ENABLED</code></td><td>true</td></tr>
+<tr><td><code>INTENT_MIN_SCORE</code></td><td>0.85</td></tr>
+<tr><td><code>INTENT_MIN_MARGIN</code></td><td>0.03</td></tr>
+<tr><td><code>LLM_MAX_ATTEMPTS</code> / <code>LLM_MAX_WAIT_S</code></td><td>4 / 25</td></tr>
+<tr><td><code>SESSION_TTL_SECONDS</code></td><td>86,400</td></tr>
+<tr><td><code>SESSION_COOKIE_SAMESITE</code></td><td>lax</td></tr>
+</table></div>
+</section>
+
+<section id="security">
+<h2>Security and privacy</h2>
+<h3>Access and abuse control</h3>
+<ul>
+<li>Signed, random, HttpOnly session cookie. Secure by default. It identifies a session and grants no privileges.</li>
+<li>Redis rate limits per session and per client IP. IPv6 grouped by /64. Keys use SHA-256 digests, not raw values.</li>
+<li>Over-limit requests get HTTP 429 with <code>Retry-After</code>. Redis failure fails closed with HTTP 503.</li>
+<li>The admin tool needs both proxy Basic Auth and its own login. XSRF protection is on.</li>
+<li>Request bodies are capped at 64 KiB, and 32 MiB for admin uploads.</li>
+</ul>
+<h3>Input and output protection</h3>
+<div class="tw"><table>
+<tr><th>Direction</th><th>Order of checks</th></tr>
+<tr><td>Input</td><td>PII and secret masking, then length and injection rules, then an LLM policy check.</td></tr>
+<tr><td>Output</td><td>Prompt-leak check, PII masking, numeric grounding.</td></tr>
+</table></div>
+<ul>
+<li>Input masking covers phone, email, payment card, SSN, IBAN, IP address, bank number, passport, driver licence, Aadhaar and PAN.</li>
+<li>Output masking leaves phone numbers alone, so investor-relations numbers survive. Secrets are masked both ways.</li>
+<li>If Presidio fails, regex masking takes over.</li>
+<li>Prior chat turns are masked before routing or generation.</li>
+<li>If rails fail, the request is blocked by default.</li>
+</ul>
+<h3>Audit and telemetry</h3>
+<ul>
+<li>Logfire spans cover startup, routing, guardrails, search, reranking and LLM calls, with token usage.</li>
+<li>Spans store a query hash and length, not the raw query.</li>
+<li>Trace access and retention still need to be set per deployment.</li>
+</ul>
+<h3>Edge hardening</h3>
+<p>HTTPS only with TLS 1.2 and 1.3, one-year HSTS, <code>nosniff</code>, same-origin framing and a strict referrer policy.</p>
+</section>
+
+<section id="deployment">
+<h2>Deployment</h2>
+<p>Docker Compose runs four services. Only Nginx publishes host ports.</p>
+<div class="flow">
+<div class="box">Internet</div><span class="ar">→</span>
+<div class="box a">Nginx<small>80 / 443</small></div><span class="ar">→</span>
+<div class="box">API<small>FastAPI, port 8000</small></div><span class="ar">→</span>
+<div class="box">Redis<small>6379, internal</small></div>
+</div>
+<div class="flow">
+<div class="box a">Nginx</div><span class="ar">→</span>
+<div class="box">Admin<small>Streamlit, /admin</small></div><span class="ar">→</span>
+<div class="box">External Qdrant</div>
+</div>
+<div class="tw"><table>
+<tr><th>Service</th><th>Role</th><th>Limits</th></tr>
+<tr><td>Nginx</td><td>HTTPS, React app, proxy to API and admin.</td><td>128 MiB</td></tr>
+<tr><td>API</td><td>Chat service. One Uvicorn worker, non-root.</td><td>5 GiB, 4 CPUs</td></tr>
+<tr><td>Redis</td><td>Cache, rate counters, queue. Append-only persistence, <code>volatile-lru</code> at 512 MiB.</td><td>768 MiB</td></tr>
+<tr><td>Admin</td><td>Ingestion UI.</td><td>3 GiB</td></tr>
+</table></div>
+<h3>Tech stack</h3>
+<div class="tw"><table>
+<tr><th>Layer</th><th>Tools</th></tr>
+<tr><td>Frontend</td><td>React 19, TypeScript, Vite</td></tr>
+<tr><td>API</td><td>FastAPI, Pydantic, Uvicorn, Python 3.12</td></tr>
+<tr><td>Retrieval</td><td>Qdrant, FastEmbed, rank-bm25, Voyage AI</td></tr>
+<tr><td>LLM</td><td>Groq</td></tr>
+<tr><td>Safety</td><td>NeMo Guardrails, Presidio, spaCy</td></tr>
+<tr><td>Cache</td><td>Redis, RedisVL</td></tr>
+<tr><td>Ingestion</td><td>Docling, Streamlit</td></tr>
+<tr><td>Observability</td><td>Logfire</td></tr>
+</table></div>
+<h3>Operations</h3>
+<ul>
+<li>Qdrant is not in the Compose file. An external URL and key are required.</li>
+<li>The API health check calls the readiness route, with a 20-minute warmup window.</li>
+<li>Startup warms Qdrant, BM25, the reranker client, cache, guardrails, PII and intent models, then refreshes the catalog.</li>
+<li>Nginx gives the API route 145 seconds to respond. The app deadline is 80 seconds.</li>
+<li>Scaling is bounded by design. One RAG request runs at a time across API processes, and up to 10 wait.</li>
+<li>Each API worker holds its own in-memory indexes and model objects.</li>
+</ul>
+</section>
+
+</main>
+</div>
+<script>
+(function(){
+var root=document.documentElement,nav=document.getElementById('nav');
+try{var t=localStorage.getItem('theme');if(t)root.setAttribute('data-theme',t)}catch(e){}
+document.getElementById('theme').onclick=function(){
+var dark=root.getAttribute('data-theme')?root.getAttribute('data-theme')==='dark':matchMedia('(prefers-color-scheme:dark)').matches;
+var n=dark?'light':'dark';root.setAttribute('data-theme',n);try{localStorage.setItem('theme',n)}catch(e){}};
+document.getElementById('menu').onclick=function(){nav.classList.toggle('open')};
+var links=[].slice.call(nav.querySelectorAll('a'));
+links.forEach(function(a){a.addEventListener('click',function(){nav.classList.remove('open')})});
+var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'))});
+function spy(){var y=window.scrollY+100,cur=0;secs.forEach(function(s,i){if(s.offsetTop<=y)cur=i});
+links.forEach(function(a,i){a.classList.toggle('on',i===cur)})}
+addEventListener('scroll',spy,{passive:true});spy();
+})();
+</script>
+</body>
+</html>

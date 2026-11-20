@@ -23,7 +23,8 @@ from app.config import settings
 
 FAST_LABELS = {"smalltalk", "elaboration", "reference", "summary", "out_of_scope"}
 SHORT_ONLY = {"smalltalk", "elaboration", "reference", "summary"}  # these are always short utterances
-MAX_WORDS_SHORT, MAX_WORDS_ANY = 12, 40
+MAX_WORDS_SHORT = settings.MAX_WORDS_SHORT
+MAX_WORDS_ANY = settings.MAX_WORDS_ANY
 
 
 @dataclass

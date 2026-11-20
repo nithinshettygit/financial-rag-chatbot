@@ -4,10 +4,9 @@ Used by the router, the answer generator and the evaluation judge so a tokens-pe
 limit causes a short wait instead of a failed request.
 
 Env:
-  LLM_MAX_ATTEMPTS        attempts per call                          (default 4)
-  LLM_MAX_WAIT_S          total seconds we may sleep per call        (default 10 - keeps serving under its timeout;
-                                                                      the eval runner raises this to 120)
-  LLM_REASONING_EFFORT    low|medium|high, applied to gpt-oss models only (fewer hidden reasoning tokens = less TPM)
+  LLM_MAX_ATTEMPTS        attempts per call
+  LLM_MAX_WAIT_S          total seconds we may sleep per call
+  LLM_REASONING_EFFORT    low|medium|high, applied to gpt-oss models only
 """
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ import threading
 import time
 from typing import Any, Optional, Tuple
 
-from groq import APIConnectionError, Groq, InternalServerError, RateLimitError
+from groq import APIConnectionError, AuthenticationError, Groq, InternalServerError, RateLimitError
 
 from app.config import settings
 
@@ -30,6 +29,17 @@ _PART_RE = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)", re.I)
 _UNIT_S = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
 _CLIENTS_LOCK = threading.Lock()
 _CLIENTS_BY_TIMEOUT: dict[float, Tuple[Groq, ...]] = {}
+
+
+def extract_completion_text(response: Any) -> str:
+    """Return non-empty assistant text or fail explicitly on malformed completions."""
+    try:
+        content = response.choices[0].message.content
+    except (AttributeError, IndexError, TypeError) as error:
+        raise ValueError("Groq returned a malformed completion") from error
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("Groq returned an empty completion")
+    return content.strip()
 
 
 def get_groq_clients(timeout: float = 30.0) -> Tuple[Groq, ...]:
@@ -67,19 +77,41 @@ def chat_with_retry(client: Any, *, max_total_wait_s: Optional[float] = None, **
     if not clients:
         raise ValueError("At least one Groq client is required")
 
-    max_attempts = int(os.getenv("LLM_MAX_ATTEMPTS", "4"))
-    budget = max_total_wait_s if max_total_wait_s is not None else float(os.getenv("LLM_MAX_WAIT_S", "10"))
-    effort = os.getenv("LLM_REASONING_EFFORT")
+    max_attempts = int(os.getenv("LLM_MAX_ATTEMPTS", str(settings.LLM_MAX_ATTEMPTS)))
+    budget = (
+        max_total_wait_s
+        if max_total_wait_s is not None
+        else float(os.getenv("LLM_MAX_WAIT_S", str(settings.LLM_MAX_WAIT_S)))
+    )
+    effort = os.getenv("LLM_REASONING_EFFORT", settings.LLM_REASONING_EFFORT)
     if effort and "gpt-oss" in str(kwargs.get("model", "")) and "reasoning_effort" not in kwargs:
         kwargs["reasoning_effort"] = effort
 
     waited = 0.0
     client_index = 0
     rate_limited_clients = set()
+    invalid_response_clients = set()
     for attempt in range(1, max_attempts + 1):
         try:
-            return clients[client_index].chat.completions.create(**kwargs)
-        except (RateLimitError, APIConnectionError, InternalServerError) as exc:
+            response = clients[client_index].chat.completions.create(**kwargs)
+            try:
+                extract_completion_text(response)
+            except ValueError:
+                logger.warning("Groq returned an empty or malformed completion")
+                invalid_response_clients.add(client_index)
+                next_index = next(
+                    (i for i in range(len(clients)) if i not in invalid_response_clients),
+                    None,
+                )
+                if attempt == max_attempts:
+                    raise
+                if next_index is not None:
+                    client_index = next_index
+                else:
+                    invalid_response_clients.clear()
+                continue
+            return response
+        except (RateLimitError, AuthenticationError, APIConnectionError, InternalServerError) as exc:
             if isinstance(exc, RateLimitError):
                 rate_limited_clients.add(client_index)
                 next_index = next(
@@ -90,6 +122,19 @@ def chat_with_retry(client: Any, *, max_total_wait_s: Optional[float] = None, **
                     client_index = next_index
                     continue
                 rate_limited_clients.clear()
+            elif isinstance(exc, AuthenticationError):
+                next_index = next((i for i in range(len(clients)) if i != client_index), None)
+                if next_index is not None and attempt < max_attempts:
+                    logger.warning("Groq request failed; switching to another configured API key")
+                    client_index = next_index
+                    continue
+                raise
+            elif isinstance(exc, APIConnectionError):
+                next_index = next((i for i in range(len(clients)) if i != client_index), None)
+                if next_index is not None and attempt < max_attempts:
+                    logger.warning("Groq connection failed; switching to another configured API key")
+                    client_index = next_index
+                    continue
 
             hint = parse_retry_after(exc) if isinstance(exc, RateLimitError) else None
             delay = (hint if hint is not None else min(2 ** attempt, 15)) + 0.5 + random.random() * 0.5

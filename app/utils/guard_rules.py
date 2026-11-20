@@ -11,7 +11,9 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-MAX_INPUT_CHARS = 2000
+from app.config import settings
+
+MAX_INPUT_CHARS = settings.MAX_INPUT_CHARS
 
 # --------------------------------------------------------------------------- #
 # Input: prompt-injection / jailbreak heuristics
