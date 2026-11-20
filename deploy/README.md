@@ -8,11 +8,12 @@ This Compose deployment is a single-host production baseline:
   authenticate browser sessions with a signed, HttpOnly cookie and enforce
   shared per-session and per-IP Redis limits.
 - FastAPI and the Streamlit admin UI use separate private backend networks.
-  Redis Stack (for RedisVL search) is API-only; Qdrant is shared by the API and
-  admin UI. Neither database is published to the host.
+  Redis Stack (for RedisVL search) is API-only; the external Qdrant service is
+  shared by the API and admin UI.
 - The admin UI is protected by Nginx Basic Auth and its separate app login.
-- Redis, Qdrant, manifests, uploaded admin files, and model downloads use
-  persistent volumes.
+- Redis data, admin uploads, and model downloads use named volumes; manifests
+  are stored in the host `data/manifests/` directory and bind-mounted into
+  both services.
 
 ## Requirements and secrets
 
@@ -20,29 +21,33 @@ Use a Linux host with Docker Engine and the Compose plugin, a DNS name pointing
 to that host, inbound TCP ports 80/443, and a TLS certificate for the DNS name.
 Use a managed secret store for production secrets where available; otherwise
 restrict `.env.production` to the deployment account and back it up securely.
+Non-secret application defaults and settings shared by the API and admin UI are
+tracked in `config/defaults.yaml`. Both services load the same file. Edit it for
+shared runtime changes; the deployment image must be rebuilt to pick them up.
+Keep credentials and deployment-specific endpoints in `.env.production`.
 
-Regenerate dependency locks with Python 3.12 on Linux so platform markers match
-the runtime image. Run these from the repository root; the containers receive
-only dependency files, not the environment files:
+The API and admin image installs the pinned Python dependencies in
+`requirements.txt`. Regenerate the lock from `requirements.in` with Python
+3.12 on Linux so platform markers match the runtime image. Run this from the
+repository root:
 
 ```sh
 docker run --rm \
   -v "$PWD/requirements.in:/work/requirements.in:ro" \
   -v "$PWD/requirements.txt:/work/requirements.txt" \
   -w /work python:3.12-slim-bookworm sh -c \
-  'python -m pip install pip-tools && pip-compile --resolver=backtracking --strip-extras -o requirements.txt requirements.in'
-
-docker run --rm \
-  -v "$PWD/requirements-eval.in:/work/requirements-eval.in:ro" \
-  -v "$PWD/requirements.txt:/work/requirements.txt:ro" \
-  -v "$PWD/requirements-eval.txt:/work/requirements-eval.txt" \
-  -w /work python:3.12-slim-bookworm sh -c \
-  'python -m pip install pip-tools && pip-compile --resolver=backtracking --strip-extras -o requirements-eval.txt requirements-eval.in'
+  'python -m pip install "pip-tools==7.7.0" && pip-compile --resolver=backtracking --strip-extras --allow-unsafe --output-file=/tmp/requirements.txt requirements.in && cat /tmp/requirements.txt > requirements.txt'
 ```
 
-1. Copy `.env.production.example` to `.env.production`. The checked-in files
-   contain placeholders only; replace them before deployment.
-2. Set `GROQ_API_KEY`, then generate distinct high-entropy values for
+Use `--upgrade` when intentionally refreshing all locked versions. The lock
+pins Python packages and the spaCy model; it does not pin Docker base-image
+digests or operating system packages.
+
+1. Copy `.env.production.example` to `.env.production`. It contains placeholders
+   only; replace them before deployment. General application settings belong in
+   `config/defaults.yaml`, not this environment file.
+2. Set `GROQ_API_KEY` and obtain `VOYAGE_API_KEY` from the Voyage AI dashboard.
+   Then generate distinct high-entropy values for
    `SESSION_HMAC_SECRET`, `REDIS_PASSWORD`, `QDRANT_API_KEY`, and
    `ADMIN_PASSWORD`. The session secret must be at least 32 bytes. Generate
    random values with:
@@ -52,8 +57,9 @@ docker run --rm \
    ```
 
    `FALLBACK_GROQ_API_KEY` is optional and must be a different key if set.
-   Startup checks credential presence and basic format locally; it does not
-   contact credential providers or log secret values.
+   Voyage reranking sends the user query and retrieved candidate passages to
+   Voyage AI. Startup checks that the key is present but does not call Voyage
+   or log secret values.
 3. Generate a separate Nginx admin password file. Do not reuse
    `ADMIN_PASSWORD`:
 
@@ -72,8 +78,9 @@ docker run --rm \
 4. Put the TLS certificate chain at `deploy/certs/fullchain.pem` and its
    private key at `deploy/certs/privkey.pem`. Use a trusted certificate
    issuer/ACME client and renew it before expiry.
-5. Edit both `server_name example.com` entries in
-   `deploy/nginx/default.conf` to the deployed DNS name.
+5. In `deploy/nginx/default.conf`, change the HTTPS server block's
+   `server_name localhost` to the deployed DNS name. The HTTP server remains a
+   catch-all redirect.
 
 The React app sends same-origin chat requests directly to `/v1/chat`. The API
 issues a signed, HttpOnly session cookie; the browser does not need an API key.
@@ -95,29 +102,32 @@ docker compose --env-file .env.production logs -f api nginx
 
 Wait for `GET /health/ready` to return `{"status":"ready"}` before using chat.
 The first API startup may download embedding/reranking models and take several
-minutes. The Qdrant volume starts empty: use the protected admin UI to ingest
-documents, or seed reviewed manifests from the admin container:
+minutes. The configured external Qdrant collection may be empty: use the
+protected admin UI to ingest documents, or seed reviewed manifests from the
+admin container:
 
 ```sh
 docker compose --env-file .env.production exec admin \
   python admin/seed_qdrant.py --all
 ```
 
-The named `manifests` volume is initialized from the image only the first time
-that volume is created. Rebuilding the image does not replace manifests already
-in the volume. After indexing or changing manifests, restart every API replica
-so its BM25 index reloads the files:
+The `data/manifests/` bind mount is the local BM25 corpus; it is not a named
+Docker volume and is not replaced when the image is rebuilt. After indexing or
+changing manifests, restart every API replica so its in-memory BM25 index
+reloads the files:
 
 ```sh
 docker compose --env-file .env.production restart api
 ```
 
 The API adds an `X-Request-ID` to each response and logs request method, path,
-status, and latency without the request body. Chat spans and cache telemetry record only query hashes, not query text. A
-timed-out request returns `504` while its concurrency slot remains leased until
-the underlying RAG task finishes. The chat proxy timeout is bounded
-at 55 seconds, above the API's 40-second total request deadline, including
-queue wait.
+status, and latency without the request body. Chat spans and cache telemetry
+record only query hashes, not query text. A timed-out request returns `504`
+while its concurrency slot remains leased until the underlying RAG task
+finishes. The API's `REQUEST_TIMEOUT_S` default is 80 seconds, including queue
+wait; Compose does not override it. Nginx uses a 15-second connect timeout and
+145-second send/read timeouts, leaving 65 seconds beyond the API deadline for
+the application to return its own error response.
 
 Keep the admin route on a private network or restrict it at the host
 firewall/VPN layer even though both login gates are enabled.
@@ -130,9 +140,11 @@ docker compose --env-file .env.production up -d
 docker compose --env-file .env.production ps
 ```
 
-Back up the `qdrant_data`, `redis_data`, and `manifests` volumes before
-upgrades or destructive ingestion operations. Do not run `docker compose down
--v` against production; it removes persistent application data.
+Back up the external Qdrant collection using its provider-supported snapshot
+procedure, the Redis and admin-upload named volumes, and the host
+`data/manifests/` directory before upgrades or destructive ingestion
+operations. Do not run `docker compose down -v` against production; it removes
+persistent Docker volumes.
 
 ## Operational hardening
 

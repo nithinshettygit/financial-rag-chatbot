@@ -40,6 +40,8 @@ from app.services.retrieval import (
     hybrid_search_balanced,
     resolve_document_ids,
 )
+from shared.prompts import load_prompt, render_prompt
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,7 +56,7 @@ async def warmup_pipeline() -> None:
         vector.ensure_filter_indexes()
         vector.retrieve("warmup query", 1, None)
     def _warm_bm25(): get_bm25().retrieve("warmup query", 1, None)
-    def _warm_reranker(): _get_reranker().rerank("warmup query", [{"content": "warmup"}], 1)
+    def _warm_reranker_client(): _get_reranker()
     def _warm_cache():
         try:
             init_financial_cache()
@@ -67,7 +69,7 @@ async def warmup_pipeline() -> None:
     await asyncio.gather(
         asyncio.to_thread(_warm_vector),
         asyncio.to_thread(_warm_bm25),
-        asyncio.to_thread(_warm_reranker),
+        asyncio.to_thread(_warm_reranker_client),
         asyncio.to_thread(_warm_cache),
         asyncio.to_thread(_warm_guard),
         asyncio.to_thread(_warm_pii),
@@ -90,17 +92,8 @@ _GREETING_RE = re.compile(
     r"what\s+can\s+you\s+do|who\s+are\s+you|thanks|thank\s+you)(?:\s+(?:there|bot|assistant))?\s*[!.?]*\s*$",
     re.I,
 )
-_GREETING_SYSTEM = (
-    "You are a professional, friendly, and helpful Financial RAG Analytics Assistant. "
-    "Respond naturally and briefly to the user's greeting or casual message without requiring document context."
-)
-_CHAT_SYSTEM = (
-    "You are a Financial RAG Analytics Assistant that answers questions about a set of indexed company filings. "
-    "Reply briefly and naturally to greetings, thanks, and questions about what you can do, and mention that you can "
-    "answer questions about the filings (financial metrics, history, risks, comparisons). You cannot perform actions "
-    "(payments, transfers, purchases, bookings), access accounts, or help with unrelated tasks. If asked for any of "
-    "those, say so in one sentence and steer back to the filings. Never invent financial data."
-)
+_GREETING_SYSTEM = load_prompt("chat.yaml", "greeting_system")
+_CHAT_SYSTEM = load_prompt("chat.yaml", "chat_system")
 _bg_tasks: set = set()
 
 
@@ -181,27 +174,16 @@ def _reply(request: ChatRequest, answer: str, intent: str, search_query: str, st
 
 
 def _system_prompt(context: str, followup_type: str, strict: bool = False) -> str:
-    rules = [
-        "1. Tabular & Multi-Year Facts: When data is given as 'Document: Metric | Column = Value | ...', extract the exact figures for each requested year.",
-        "2. Multi-Year Comparisons: If the user asks for changes, growth rates, or comparisons over time, calculate and state the difference clearly based on the provided numbers.",
-        "3. Units & Scale: State monetary units accurately (e.g. in millions, thousands, or percentages as specified in the context).",
-        "4. Citations: Cite your sources using passage tags like [S1], [S2] where applicable.",
-        "5. Grounding: Rely strictly on the context. If figures for a requested year or metric are not present, explicitly state that they are unavailable.",
-    ]
+    guidelines = [load_prompt("chat.yaml", "answer_guidelines.base")]
     if followup_type == "elaboration":
-        rules.append(
-            "6. Elaboration: The user wants MORE detail on your previous answer. Provide only NEW information from the "
-            "context (breakdowns, drivers, comparisons, commentary). Do not restate figures you already gave. "
-            "If the context holds nothing new, say so plainly."
-        )
+        guidelines.append(load_prompt("chat.yaml", "answer_guidelines.elaboration"))
     if strict:
-        rules.append(
-            "7. STRICT: every figure you state must be copied verbatim from the context (or be a simple calculation "
-            "from context figures that you show). Never estimate or recall numbers from memory."
-        )
-    return (
-        "You are a precise, professional financial QA assistant. Answer the user query accurately and comprehensively "
-        "using ONLY the context provided below.\n\nGuidelines:\n" + "\n".join(rules) + f"\n\nCONTEXT:\n{context}"
+        guidelines.append(load_prompt("chat.yaml", "answer_guidelines.strict"))
+    return render_prompt(
+        "chat.yaml",
+        "answer_system",
+        guidelines="\n".join(guidelines),
+        context=context,
     )
 
 
@@ -338,11 +320,15 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
                 answer = "We haven't discussed anything in this session yet! Feel free to ask any question about your financial documents."
             else:
                 history_text = "\n".join(f"{t.role}: {t.content}" for t in history)
-                answer, _ = await _llm([{"role": "user", "content": (
-                    "You are the assistant participating directly in this conversation. Speak naturally to the user in a "
-                    "warm, conversational, and direct tone (using \"you\" and \"we\"). Summarize the key questions the user "
-                    "asked and the main points we discussed so far. Do NOT sound like an external observer.\n\n"
-                    f"Conversation History:\n{history_text}\n\nNatural Conversation Summary:")}], 0.2)
+                summary_prompt = render_prompt(
+                    "chat.yaml",
+                    "summary_user",
+                    history=history_text,
+                )
+                answer, _ = await _llm(
+                    [{"role": "user", "content": summary_prompt}],
+                    0.2,
+                )
                 answer = await _guard_free_text(query, answer, events)
             _mark()
             return _reply(request, answer, plan.intent, plan.search_query, plan.state)
@@ -403,7 +389,7 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
             search_span.set_attribute("candidates_count", len(candidates))
             search_span.set_attribute("candidate_source_files", list({c.get("source_file") for c in candidates if c.get("source_file")}))
 
-        with logfire.span("FlashRank Reranking", candidates_in=len(candidates)) as rerank_span:
+        with logfire.span("Voyage Reranking", candidates_in=len(candidates)) as rerank_span:
             base_k = FINAL_TOP_K + (3 if follow == "elaboration" else 0)  # elaboration needs a wider context
             n_ent = max(len(entity_filters), 1)
             # multi-company questions: at least 3 chunks per company, even if that exceeds the usual cap
@@ -422,7 +408,15 @@ async def run_rag_pipeline_async(request: ChatRequest) -> ChatResponse:
                           plan.intent, plan.search_query, plan.state)
 
         # --- 6. Generation + output rails (one strict retry if figures are not grounded) ---
-        user_content = query if query.strip() == plan.search_query.strip() else f"{query}\n(Retrieval focus: {plan.search_query})"
+        if query.strip() == plan.search_query.strip():
+            user_content = render_prompt("chat.yaml", "rag_user_plain", query=query)
+        else:
+            user_content = render_prompt(
+                "chat.yaml",
+                "rag_user_with_focus",
+                query=query,
+                search_query=plan.search_query,
+            )
 
         answer, guard_out = "", None
         for attempt in (1, 2):

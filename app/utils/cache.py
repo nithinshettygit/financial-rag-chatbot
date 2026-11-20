@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import threading
 from dataclasses import dataclass
@@ -33,7 +32,7 @@ from app.config import settings
 CACHE_INDEX_NAME = "financial_semantic_cache_v6"
 CACHE_PREFIX = "fincache_v6"
 L1_PREFIX = "fincache_l1_v2"
-EMBED_DIMS = 384  # bge-small-en-v1.5
+EMBED_DIMS = settings.EMBEDDING_DIMENSIONS
 
 _REDIS_CLIENT: Optional[Redis] = None
 _VECTORIZER = None
@@ -125,7 +124,7 @@ def get_vectorizer():
     if _VECTORIZER is None:
         with _VEC_LOCK:  # warmup threads call this concurrently
             if _VECTORIZER is None:
-                _VECTORIZER = HFTextVectorizer(model="BAAI/bge-small-en-v1.5")
+                _VECTORIZER = HFTextVectorizer(model=settings.EMBEDDING_MODEL)
     return _VECTORIZER
 
 
@@ -133,7 +132,7 @@ def get_redis_client() -> Redis:
     global _REDIS_CLIENT
     if _REDIS_CLIENT is None:
         _REDIS_CLIENT = Redis.from_url(
-            os.getenv("REDIS_URL", settings.REDIS_URL),
+            settings.REDIS_URL,
             decode_responses=True,
             socket_connect_timeout=2,
             socket_timeout=5,

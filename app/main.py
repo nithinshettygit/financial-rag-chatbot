@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -14,7 +13,7 @@ from app.queue import QueueLease, rag_queue
 from app.schemas import ChatRequest, ChatResponse
 from app.security import enforce_chat_rate_limit, ensure_session, validate_security_settings
 from app.utils.logger import logger
-from app.utils.vector import VectorStoreError
+from app.retrieval.qdrant import VectorStoreError
 
 
 logfire.configure(
@@ -24,7 +23,7 @@ logfire.configure(
 )
 logfire.instrument_httpx()
 
-REQUEST_TIMEOUT_S = float(os.getenv("REQUEST_TIMEOUT_S", "80"))
+REQUEST_TIMEOUT_S = settings.REQUEST_TIMEOUT_S
 _QUEUE_SUPERVISORS: set[asyncio.Task] = set()
 
 

@@ -14,7 +14,7 @@ from app.utils.cache import build_scope
 from app.utils.guardrails import _check_rails, check_input, check_output
 from app.utils.llm import chat_with_retry, extract_completion_text
 from app.utils.router import validate_router_response
-from app.utils.vector import QdrantVectorRetriever, VectorStoreError
+from app.retrieval.qdrant import QdrantVectorRetriever, VectorStoreError
 
 
 class ResilienceTests(unittest.TestCase):

@@ -1,5 +1,19 @@
 # Financial RAG Application — System Design and Execution Guide
 
+> **Document status:** Implementation-aligned architecture reference; not a
+> production-readiness certification.
+> **Last verified:** 2026-11-19 against the repository working tree, including
+> the API, admin UI, shared settings, Compose topology, and Nginx configuration.
+> Source links are repository-relative and assume this file remains under
+> `z-Present/`.
+The current order is:
+
+The intent router sees the raw query first. It’s an embedding-based classifier, not an LLM call; the project uses HFTextVectorizer for it (intent_router.py, cache.py).
+If the query doesn’t take a fast path, input guardrails run.
+Query planning—including the LLM router—comes after those guardrails.
+So an LLM isn’t used for intent routing before the guardrails, but the raw text is processed by the embedding model first. That’s generally reasonable if the model runs locally and fast-pathing is an intentional tradeoff. The current fast path does a PII check, but skips the full injection/policy checks. If your requirement is that all user text pass guardrails before any model processes it, move routing after the guardrails.
+
+
 ## 1. Purpose, scope, and evidence boundary
 
 This document describes the application runtime under [`app/`](../app/): the
@@ -18,15 +32,23 @@ answer, and returns both the answer and supporting chunks.
 - [`app/main.py`](../app/main.py) owns FastAPI startup, readiness, health, and
   the `/v1/chat` endpoint.
 - [`app/pipeline.py`](../app/pipeline.py) coordinates the request lifecycle.
-- [`app/utils/`](../app/utils/) contains specialized routing, retrieval,
-  caching, reranking, guardrail, PII, LLM, token, and logging code.
-- [`app/guardrails_config/`](../app/guardrails_config/) defines NeMo flows,
-  prompts, and custom actions.
+- [`app/services/`](../app/services/) coordinates retrieval, fusion, and
+  context packing; [`app/retrieval/`](../app/retrieval/) contains the Qdrant,
+  BM25, and Voyage adapters; [`app/utils/`](../app/utils/) contains routing,
+  caching, guardrails, PII, LLM, token, and logging helpers.
+- [`config/defaults.yaml`](../config/defaults.yaml) and
+  [`shared/settings.py`](../shared/settings.py) define shared non-secret
+  defaults for the API and admin UI; process environment values override them.
+- [`app/guardrails_config/`](../app/guardrails_config/) defines NeMo flows and
+  custom actions. Shared chat, router, and guardrail prompts live in
+  [`prompts/`](../prompts/) and are loaded by [`shared/prompts.py`](../shared/prompts.py).
 - [`web/`](../web/) contains the React + TypeScript user-facing chat client.
 - The administrative ingestion UI is separate under [`admin/`](../admin/).
-- Document parsing and Qdrant seeding are performed separately by
-  [`admin/`](../admin/), documented in
-  [`ADMIN_INGESTION_REPORT.md`](./ADMIN_INGESTION_REPORT.md).
+- The admin UI parses PDFs or accepts existing manifests, then seeds the
+  configured Qdrant collection. Its runtime integration is described here from
+  [`admin/app.py`](../admin/app.py), [`admin/parse_pdf.py`](../admin/parse_pdf.py),
+  [`admin/seed_qdrant.py`](../admin/seed_qdrant.py), and
+  [`compose.yaml`](../compose.yaml).
 
 This is an implementation guide, not a claim that external services or every
 configured feature are available in every environment. Behaviors below are
@@ -79,7 +101,7 @@ flowchart TD
     CACHE -->|miss| DOCS[Catalog → document IDs<br/>and query filters]
     DOCS --> SEARCH[Concurrent Qdrant + BM25<br/>for each subquery]
     SEARCH --> FUSE[Entity-bucketed RRF fusion]
-    FUSE --> RERANK[FlashRank<br/>entity-balanced]
+    FUSE --> RERANK[Voyage AI reranker<br/>entity-balanced]
     RERANK --> PACK[Token-budgeted context<br/>and [S#] source map]
     PACK --> GEN[Groq answer generation]
     GEN --> OUT[NeMo output rails<br/>prompt leak → PII → numeric]
@@ -116,12 +138,12 @@ flowchart TD
 | [`schemas.py`](../app/schemas.py) | Pydantic request, turn, session-state, context-chunk, and response schemas. |
 | [`pipeline.py`](../app/pipeline.py) | Intent fast path, input/output checks, query planning, answer cache, reranking, generation, and response assembly. |
 | [`services/retrieval.py`](../app/services/retrieval.py) | Process-local retrieval instances, catalog refresh, document resolution, dense/BM25 hybrid search with RRF, and context packing. |
-| [`config.py`](../app/config.py) | Pydantic Settings defaults and `.env` loading. |
+| [`config/defaults.yaml`](../config/defaults.yaml), [`shared/settings.py`](../shared/settings.py), [`config.py`](../app/config.py) | Version-controlled shared non-secret defaults, environment/`.env` overrides, and API-specific secret settings. |
 | [`utils/router.py`](../app/utils/router.py) | Groq JSON-mode routing, company/year/metric parsing, follow-up handling, state update, filter/subquery construction. |
 | [`utils/intent_router.py`](../app/utils/intent_router.py) | Optional embedding-based classifier for high-confidence shortcuts and follow-up hints. |
-| [`utils/vector.py`](../app/utils/vector.py) | Dense query embedding, Qdrant document catalog enumeration, filtered named-vector search, payload normalization. |
-| [`utils/bm25.py`](../app/utils/bm25.py) | Local manifest loading, lexical index creation, metadata-aware query filtering and BM25 ranking. |
-| [`utils/flashrank_reranker.py`](../app/utils/flashrank_reranker.py) | Relevance reranking, financial metadata enrichment, per-company rerank/interleave. |
+| [`retrieval/qdrant.py`](../app/retrieval/qdrant.py) | Dense query embedding, Qdrant document catalog enumeration, filtered named-vector search, payload normalization. |
+| [`retrieval/bm25.py`](../app/retrieval/bm25.py) | Local manifest loading, lexical index creation, metadata-aware query filtering and BM25 ranking. |
+| [`retrieval/voyage_reranker.py`](../app/retrieval/voyage_reranker.py) | Voyage AI relevance reranking, financial metadata enrichment, per-company rerank/interleave. |
 | [`utils/cache.py`](../app/utils/cache.py) | Exact Redis L1 and scoped semantic RedisVL L2 answer cache. |
 | [`utils/guardrails.py`](../app/utils/guardrails.py) | Async NeMo rails wrapper, configured secondary-provider fallback, fail-closed error handling, and refusal selection. |
 | [`utils/guard_rules.py`](../app/utils/guard_rules.py) | Dependency-light injection, prompt-leak, and numeric-grounding checks. |
@@ -129,7 +151,8 @@ flowchart TD
 | [`utils/llm.py`](../app/utils/llm.py) | Groq client reuse, rate-limit-aware retry, API-key rotation, bounded retry wait. |
 | [`utils/tokens.py`](../app/utils/tokens.py) | Token estimates/provider usage attributes and history slicing helper. |
 | [`utils/logger.py`](../app/utils/logger.py) | JSON-formatted stdout logger for the named application logger. |
-| [`guardrails_config/`](../app/guardrails_config/) | NeMo input/output flows, policy prompt, and action bindings. |
+| [`guardrails_config/`](../app/guardrails_config/) | NeMo input/output flows and action bindings. |
+| [`prompts/`](../prompts/) | Shared YAML prompts for chat, query routing, and NeMo input checks. |
 | [`web/`](../web/) | React + TypeScript chat client for the readiness and chat endpoints. |
 
 Most expensive backend components are process-local lazy singletons. Creating
@@ -150,7 +173,7 @@ objects and in-memory indexes; workers do not share Python process memory.
   separate classifier model.
 - **Local manifests / rank-bm25:** lexical retrieval index, loaded into memory
   when the BM25 retriever is created.
-- **FlashRank / `ms-marco-MiniLM-L-12-v2`:** local candidate reranking model.
+- **Voyage AI:** hosted candidate reranking. Query text and retrieved candidate passages are sent to the configured Voyage API.
 - **Redis / RedisVL:** answer cache, including semantic vector search.
 - **NeMo Guardrails / LangChain Groq:** prompt-policy and output rails.
 - **Presidio / spaCy `en_core_web_sm`:** configurable PII entity recognition.
@@ -158,9 +181,8 @@ objects and in-memory indexes; workers do not share Python process memory.
 - **FastAPI / Pydantic / Uvicorn:** HTTP service, typed API boundary, and ASGI
   server.
 - **Streamlit:** separate admin/ingestion user interface.
-- **PyTorch CPU / Transformers:** supporting ML dependencies; the online chat
-  path's directly configured local model IDs are BGE-small and the FlashRank
-  reranker listed above.
+- **PyTorch CPU / Transformers:** supporting ML dependencies; BGE-small is the
+  online chat path's directly configured local model.
 - **Docling:** PDF parsing/chunking in the separate admin/ingestion workflow,
   not in the chat request path.
 - **React 19 / TypeScript / Vite:** user-facing chat client, built and served
@@ -175,13 +197,13 @@ objects and in-memory indexes; workers do not share Python process memory.
 |---|---|
 | Groq-hosted `openai/gpt-oss-20b` | Default for `LLM_MODEL` (JSON query planning and answer generation) and `GUARDRAIL_LLM_MODEL` (NeMo policy self-check). The two settings can be configured independently. The `openai/` prefix is part of the Groq model ID; the app uses Groq clients, not the OpenAI API. |
 | `BAAI/bge-small-en-v1.5` | FastEmbed creates query embeddings for Qdrant dense search. RedisVL's `HFTextVectorizer` uses the same model for semantic cache embeddings, and the semantic intent router reuses that cache vectorizer. Embedding dimension is 384. |
-| `ms-marco-MiniLM-L-12-v2` | FlashRank `Ranker` reorders hybrid-search candidates locally; configure with `RERANKER_MODEL`. |
+| `rerank-3-lite` | Voyage AI reorders hybrid-search candidates through its API; configure with `RERANKER_MODEL`. |
 | spaCy `en_core_web_sm` | Loaded by Presidio for PII entity analysis. If Presidio/spaCy initialization or analysis fails, masking falls back to regex patterns. |
 | Docling parser/chunker | Used by the separate PDF ingestion/admin workflow, not chat-time inference. The app Settings do not specify a Docling model ID. |
 
 The application does not configure a local generative model runtime. LLM
-inference is sent to Groq; the embedding and reranking models run locally in
-the API container and are cached in its model-cache volume.
+inference is sent to Groq, query embeddings run locally, and candidate
+reranking is sent to Voyage AI.
 
 ### Data ownership and consistency
 
@@ -191,6 +213,10 @@ the API container and are cached in its model-cache volume.
 - The admin ingestion process must make the manifest directory visible to the
   API process and must index into the same Qdrant collection/deployment used by
   the API.
+- Compose bind-mounts the host `data/manifests/` directory into both API and
+  admin containers. The admin UI uses the shared YAML defaults and requires
+  the configured remote Qdrant URL and API key; its Qdrant collection must
+  match the API's collection and named-vector settings.
 - The configured collection is `financial_rag_analytics`; the configured
   named vector is `fastembed-BAAI-bge-small-en-v1-5`; its expected size is
   384 with cosine distance.
@@ -263,7 +289,7 @@ does not grant authorization privileges by itself.
    worker threads for:
    - Qdrant/vector embeddings (a small warmup retrieval);
    - BM25 loading and retrieval;
-   - FlashRank initialization and a sample rerank;
+   - Voyage client initialization without a billable API call;
    - answer-cache Redis/vectorizer/L2-index setup;
    - NeMo guardrail construction;
    - Presidio/spaCy initialization;
@@ -330,7 +356,7 @@ initialization and catalog-refresh errors can fail the application startup.
 | `nginx` | Container TCP 80 and 443; published as host `80:80` and `443:443` | Only service publishing host ports. Redirects HTTP to HTTPS and serves the built React app, API routes, and protected admin proxy. |
 | `api` | Uvicorn `0.0.0.0:8000`; not published on the host | FastAPI chat service. Reachable by Nginx on `proxy_api`; Redis reachable on internal `api_backend`. One Uvicorn worker is configured with proxy headers and 30-second keep-alive. |
 | `redis` | Redis/Redis Stack TCP 6379; not published on the host | Cache, distributed rate-limit counters, and distributed RAG queue. Attached only to internal `api_backend`. |
-| `admin` | Streamlit `0.0.0.0:8501`, base path `/admin`; not published on the host | Ingestion UI. Reachable from Nginx on `proxy_admin`; Nginx Basic Auth protects the route. |
+| `admin` | Streamlit `0.0.0.0:8501`, base path `/admin`; not published on the host | Ingestion UI. Reachable from Nginx on `proxy_admin`; both Nginx Basic Auth and the Streamlit app login protect access. |
 
 No Qdrant server is started by this Compose file: the API and admin service
 expect the configured external Qdrant URL and credential. Compose mounts the
@@ -340,6 +366,13 @@ Networks separate the public proxy, API proxy, admin proxy, and the internal
 API-to-Redis backend. API/admin containers have resource limits; the API has
 5 GiB memory and 4 CPUs, admin 3 GiB, Redis 768 MiB (Redis maxmemory 512 MiB),
 and Nginx 128 MiB.
+
+The multi-stage [`Dockerfile`](../Dockerfile) builds the React client with
+Node 22 and `npm ci`, installs the API/admin Python dependencies from the
+pinned [`requirements.txt`](../requirements.txt) lock on Python 3.12, then
+copies the frontend build into the Nginx image. Base-image tags are used rather
+than immutable digests, so the build is not fully reproducible at the image
+level.
 
 Redis enables append-only persistence and uses `volatile-lru` eviction at
 512 MiB. Its password is required through `REDIS_PASSWORD`; the container
@@ -364,8 +397,9 @@ API health and admin startup. The API container uses a non-root user,
 - Nginx serves the SPA and `/assets/`; `/health`, `/health/ready`, and
   `/v1/chat` proxy to `api:8000`. The API route accepts POST only, does not
   retry POSTs, and uses 15-second connect and 145-second send/read timeouts.
-  The current proxy comment expects a 120-second API timeout plus margin;
-  the code default is 80 seconds and Compose supplies 120 seconds by default.
+  Compose uses the shared `REQUEST_TIMEOUT_S` default of 80 seconds and does
+  not override it; the proxy read timeout therefore allows 65 seconds beyond
+  the application deadline.
 - Request size is limited to 64 KiB generally and 32 MiB for `/admin/`.
   Per-client connection count is capped at 20. Admin requests additionally
   have a 5 requests/second Nginx limit with burst 10 and `nodelay`; `/admin`
@@ -374,7 +408,8 @@ API health and admin startup. The API container uses a non-root user,
 - `/admin/` uses HTTP Basic Auth from the mounted `admin.htpasswd` file,
   forwards WebSocket upgrade headers, disables proxy buffering, and has a
   300-second read timeout. Streamlit XSRF protection is enabled in its
-  service command.
+  service command. The admin app also requires its own configured
+  `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
 - Response headers include `nosniff`, same-origin frame protection, strict
   referrer policy, and one-year HSTS. Nginx hides its version.
 
@@ -402,7 +437,7 @@ sequenceDiagram
     participant K as Redis cache
     participant V as Qdrant
     participant B as BM25
-    participant X as FlashRank
+    participant X as Voyage AI
     participant L as Groq
 
     C->>F: POST /v1/chat
@@ -456,8 +491,8 @@ sequenceDiagram
 3. FastAPI/Pydantic validates `ChatRequest`; the endpoint then checks readiness
    and returns HTTP 503 with a warmup message if the service is not ready.
 4. The endpoint waits for a distributed RAG queue lease, then starts the
-   pipeline under the remaining `REQUEST_TIMEOUT_S` deadline (80 seconds in
-   code; 120 seconds by default in Compose).
+   pipeline under the remaining `REQUEST_TIMEOUT_S` deadline (80 seconds from
+   the shared YAML default; Compose does not currently override it).
 5. An asyncio timeout becomes HTTP 504. Other unhandled exceptions are logged
    and mapped to HTTP 500.
 
@@ -615,7 +650,7 @@ per-entity retrieval depth of at least `MIN_STRICT_YIELD`.
 This fusion combines rankings; raw Qdrant cosine scores and raw BM25 values do
 not directly share a common scale and are not directly averaged.
 
-#### Stage 9 — FlashRank reranking and final candidate count
+#### Stage 9 — Voyage AI reranking and final candidate count
 
 - Each candidate passage is augmented for reranking with available company,
   filename, section, metric, years, columns, and row-label information.
@@ -626,8 +661,8 @@ not directly share a common scale and are not directly averaged.
   subject to the actual candidate supply; the final selection may exceed the
   ordinary top-k setting to preserve entity coverage.
 - Elaboration follow-ups request a wider base result set.
-- If FlashRank raises, log the failure and fall back to the original candidate
-  ordering with fallback scores.
+- If the Voyage API call fails or times out, log the failure and fall back to
+  the original candidate ordering with fallback scores.
 
 #### Stage 10 — Context packing and citation map
 
@@ -756,14 +791,14 @@ returned state on the next request.
 
 ### 9.1 Dense retrieval — Qdrant
 
-[`QdrantVectorRetriever`](../app/utils/vector.py):
+[`QdrantVectorRetriever`](../app/retrieval/qdrant.py):
 
 - initializes `TextEmbedding` with `EMBEDDING_MODEL` (default BGE-small);
-- reads `FASTEMBED_CACHE_DIR` and `FASTEMBED_LOCAL_FILES_ONLY` environment
-  variables for local model behavior;
+- reads `FASTEMBED_CACHE_DIR` and `FASTEMBED_LOCAL_FILES_ONLY` from shared
+  settings for local model behavior;
 - connects to remote Qdrant when `QDRANT_URL` is configured, passing
-  `QDRANT_API_KEY`; the no-URL fallback currently references
-  `settings.QDRANT_STORAGE_PATH`, which is not declared in `config.py`;
+  `QDRANT_API_KEY`; otherwise, it opens the local path from
+  `QDRANT_STORAGE_PATH` (default `data/qdrant_storage`);
 - returns empty results when the configured collection does not exist;
 - embeds the query, calls Qdrant `query_points()` with the configured named
   vector and `RETRIEVAL_K` default 30;
@@ -782,11 +817,12 @@ metadata is absent, and returns a sorted document catalog.
 
 ### 9.2 Lexical retrieval — local BM25
 
-[`BM25Retriever`](../app/utils/bm25.py):
+[`BM25Retriever`](../app/retrieval/bm25.py):
 
 - checks `data/manifests/*.json` first; if that directory has no JSON files, it
-  recursively scans the data directory; it may use `BM25_MANIFEST_PATH` as a
-  fallback;
+  recursively scans the data directory except for the configured
+  `MANIFEST_METADATA_SUBDIR`;
+  it may use `BM25_MANIFEST_PATH` as a fallback;
 - skips manifest files with names beginning `old_`, containing `_old`,
   ending `.bak`, or containing `cache` or `evaluation`;
 - accepts only JSON arrays and logs unreadable files;
@@ -809,13 +845,13 @@ Given rankings `r` and candidate rank `k`, a candidate receives
 ranking are ignored. Fusion happens inside the subquery’s entity bucket, which
 allows a subsequent per-entity quota before filling from the global leftovers.
 
-### 9.4 FlashRank
+### 9.4 Voyage AI reranking
 
-[`FlashRankReranker`](../app/utils/flashrank_reranker.py) packages each passage
-with its text plus selected metadata before reranking. For multi-company
+[`VoyageReranker`](../app/retrieval/voyage_reranker.py) packages each passage
+with its text plus selected metadata before sending it to the Voyage API. For multi-company
 questions, each entity group gets an entity-specific rerank query and ranked
 lists are interleaved round-robin. The fallback path returns the incoming order
-if FlashRank fails.
+if the API fails or times out.
 
 ### 9.5 Evidence and source attribution
 
@@ -870,7 +906,8 @@ make another policy-model call.
 
 The policy prompt asks the checker whether the request should be blocked and
 contains in-scope/out-of-scope examples. Its prompt text is in
-[`prompts.yml`](../app/guardrails_config/prompts.yml).
+[`guardrails.yaml`](../prompts/guardrails.yaml). Chat and router prompts are
+also maintained in this directory and loaded through `shared/prompts.py`.
 
 ### 10.3 PII and secret masking
 
@@ -968,6 +1005,12 @@ pipeline restores `retrieved_chunks` but `_reply()` is called without a
 `source_map`, so cached responses have an empty source map even if the original
 response was source-mapped.
 
+**Runtime verification (2026-11-19):** an isolated synthetic answer was stored
+in the RedisVL index, then found with a paraphrased query after bypassing the
+exact-key match. The returned tier was `l2`; the canary keys were deleted.
+This verifies the cache store/semantic-lookup path against the running Redis
+service, not a complete browser-to-chat request.
+
 Answers are stored only after successful output checks and only if all
 requested entities are represented in final evidence. General chat and
 summaries are not cached by the normal RAG path; the separate smalltalk helper
@@ -988,8 +1031,8 @@ uses the greeting cache.
 [`utils/llm.py`](../app/utils/llm.py):
 
 - defaults to four attempts (`LLM_MAX_ATTEMPTS=4`);
-- defaults to a cumulative retry sleep budget of 10 seconds
-  (`LLM_MAX_WAIT_S=10`; Compose defaults this to 25 seconds);
+- defaults to a cumulative retry sleep budget of 25 seconds
+  (`LLM_MAX_WAIT_S=25`);
 - retries rate limits, connection errors, and internal server errors;
 - rotates to another configured key after a rate limit, before sleeping;
 - parses Groq’s “try again in …” duration or `Retry-After` header when
@@ -1047,14 +1090,16 @@ still be configured with appropriate access and retention controls.
 
 ## 14. Configuration reference
 
-Settings are defined in [`config.py`](../app/config.py), loaded with Pydantic
-Settings and `.env` for direct local runs; process environment variables
-override those values. Compose passes a selected subset through service
-environment interpolation. Direct `os.getenv()` reads do not automatically
-inherit values parsed by Pydantic from `.env`; export those variables into the
-process environment or set them in the Compose service environment.
-Additional controls are read directly from the environment in `main.py`,
-`services/retrieval.py`, `cache.py`, `vector.py`, and `llm.py`.
+Non-secret defaults are defined in [`config/defaults.yaml`](../config/defaults.yaml)
+and loaded by [`shared/settings.py`](../shared/settings.py). The shared
+Pydantic settings also load `.env` for direct local runs; process environment
+variables override both. [`app/config.py`](../app/config.py) adds API secrets
+and API-specific fields. Compose passes only variables explicitly listed in
+its service environment blocks; `--env-file .env.production` supplies
+interpolation values but does not pass every value into containers. The LLM
+retry helper also reads `LLM_MAX_ATTEMPTS`, `LLM_MAX_WAIT_S`, and
+`LLM_REASONING_EFFORT` directly from the process environment, so direct
+`os.getenv()` reads do not inherit values parsed only from `.env`.
 
 ### 14.1 Core service/model/storage settings
 
@@ -1063,12 +1108,14 @@ Additional controls are read directly from the environment in `main.py`,
 | `APP_NAME` | `Docling Financial Hybrid RAG Service` | FastAPI title. |
 | `GROQ_API_KEY` | Required | Primary Groq credential; settings construction requires it. |
 | `FALLBACK_GROQ_API_KEY` | None | Optional second Groq credential. |
+| `VOYAGE_API_KEY` | Required by Compose | Voyage AI credential used for candidate reranking. |
 | `LLM_MODEL` | `openai/gpt-oss-20b` | Router/answer model. |
 | `GUARDRAIL_LLM_MODEL` | `openai/gpt-oss-20b` | Model used by NeMo's LangChain Groq policy checks. |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Query embedding model. |
 | `VECTOR_NAME` | `fastembed-BAAI-bge-small-en-v1-5` | Qdrant named vector. |
 | `COLLECTION_NAME` | `financial_rag_analytics` | Qdrant collection. |
-| `RERANKER_MODEL` | `ms-marco-MiniLM-L-12-v2` | FlashRank model. |
+| `RERANKER_MODEL` | `rerank-3-lite` | Voyage AI reranker model. |
+| `RERANKER_TIMEOUT_S` | `20` | Voyage API request timeout. |
 | `QDRANT_URL` | None in Settings; required by Compose | Select remote Qdrant when set. |
 | `QDRANT_API_KEY` | None in Settings; required by Compose | Credential for remote Qdrant. |
 | `BM25_MANIFEST_PATH` | `data/manifests` | BM25 fallback manifest path. |
@@ -1083,33 +1130,34 @@ Additional controls are read directly from the environment in `main.py`,
 | Setting | Default | Effect |
 |---|---:|---|
 | `RETRIEVAL_K` | 30 | Default per-retriever top-k. |
-| `FINAL_TOP_K` | 5 | Base final result count; retrieval service also reads this directly from the environment. |
+| `FINAL_TOP_K` | 5 | Base final result count. |
 | `RRF_K` | 60 | Reciprocal-rank fusion constant. |
 | `MAX_HISTORY_TURNS` | 6 | Router history boundary and helper default; individual paths apply their own smaller slices. |
 | `MAX_CONTEXT_TOKENS` | 4096 | Maximum packed evidence context. |
-| `REQUEST_TIMEOUT_S` | 80 in `main.py`; Compose default 120 | Total API deadline including queue wait; the queue lease remains active until timed-out work finishes. |
-| `RERANK_CANDIDATES` | 30 | Retrieval candidate target; direct environment variable. |
-| `MAX_FINAL_TOP_K` | 10 | Cap floor for multi-entity selection; direct environment variable. |
-| `MIN_STRICT_YIELD` | 5 | Minimum distinct strict retrieval yield before relaxing year/company filters; direct environment variable. |
-| `CATALOG_TTL_S` | 300 | Catalog refresh interval; direct environment variable. |
-| `MAX_CONCURRENT_SEARCHES` | 8 | Search semaphore limit; direct environment variable. |
+| `REQUEST_TIMEOUT_S` | 80 | Total API deadline including queue wait; the queue lease remains active until timed-out work finishes. |
+| `RERANK_CANDIDATES` | 30 | Retrieval candidate target. |
+| `MAX_FINAL_TOP_K` | 10 | Candidate cap behavior for multi-entity selection. |
+| `MIN_STRICT_YIELD` | 5 | Minimum distinct strict retrieval yield before relaxing year/company filters. |
+| `CATALOG_TTL_S` | 300 | Catalog refresh interval. |
+| `MAX_CONCURRENT_SEARCHES` | 8 | Search semaphore limit. |
 
 ### 14.3 Chat request limits and RAG queue
 
-These are validated Pydantic settings. Compose defaults differ for the
-distributed queue; Compose interpolation may override these values.
+These are validated Pydantic settings. The current Compose file does not
+override them, so the shared YAML defaults apply unless the service definition
+is changed to pass overrides.
 
-| Setting | Settings default | Compose default | Effect |
-|---|---:|---:|---|
-| `CHAT_SESSION_RATE_LIMIT_REQUESTS` | 20 | 20 | Chat admissions per signed session per fixed window. |
-| `CHAT_IP_RATE_LIMIT_REQUESTS` | 60 | 60 | Chat admissions per normalized client IP per fixed window. |
-| `CHAT_RATE_LIMIT_WINDOW_SECONDS` | 60 | 60 | Fixed rate-limit window duration. |
-| `MAX_CONCURRENT_RAG` | 1 | 2 | Concurrent active RAG request leases across API processes. |
-| `MAX_QUEUE_WAITERS` | 10 | 15 | Maximum waiting RAG requests. |
-| `RAG_QUEUE_MAX_WAIT_SECONDS` | 15 | 45 | Maximum time waiting for a queue slot. |
-| `RAG_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | 0.25 | Redis queue polling interval. |
-| `RAG_QUEUE_RETRY_AFTER_SECONDS` | 2 | 3 | `Retry-After` value on full/expired queue response. |
-| `RAG_CONCURRENCY_LEASE_SECONDS` | 60 | 90 | Distributed active-slot lease duration; renewed while work is running. |
+| Setting | Default | Effect |
+|---|---:|---|
+| `CHAT_SESSION_RATE_LIMIT_REQUESTS` | 20 | Chat admissions per signed session per fixed window. |
+| `CHAT_IP_RATE_LIMIT_REQUESTS` | 60 | Chat admissions per normalized client IP per fixed window. |
+| `CHAT_RATE_LIMIT_WINDOW_SECONDS` | 60 | Fixed rate-limit window duration. |
+| `MAX_CONCURRENT_RAG` | 1 | Concurrent active RAG request leases across API processes. |
+| `MAX_QUEUE_WAITERS` | 10 | Maximum waiting RAG requests. |
+| `RAG_QUEUE_MAX_WAIT_SECONDS` | 15 | Maximum time waiting for a queue slot. |
+| `RAG_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | Redis queue polling interval. |
+| `RAG_QUEUE_RETRY_AFTER_SECONDS` | 2 | `Retry-After` value on full/expired queue response. |
+| `RAG_CONCURRENCY_LEASE_SECONDS` | 60 | Distributed active-slot lease duration; renewed while work is running. |
 
 ### 14.4 Cache settings
 
@@ -1128,14 +1176,14 @@ distributed queue; Compose interpolation may override these values.
 | `GUARDRAILS_ENABLED` | true | Enables NeMo input/output rails. |
 | `GUARDRAILS_PATH` | `app/guardrails_config` | NeMo config directory. |
 | `GUARDRAIL_LLM_MODEL` | `openai/gpt-oss-20b` | NeMo policy model. |
-| `GUARDRAILS_TIMEOUT_S` | 8 seconds in Settings; Compose default 15 | Timeout per NeMo check. |
+| `GUARDRAILS_TIMEOUT_S` | 15 seconds | Timeout per NeMo check. |
 | `GUARDRAILS_FAIL_OPEN` | false | Fail closed on rail failure; true enables deterministic fallback only. |
 | `GUARDRAILS_NUMERIC_CHECK` | true | Enable numeric evidence check. |
 | `PII_ENGINE` | `presidio` | `presidio` enables Presidio; any other value selects the regex fallback. |
 | `PII_SPACY_MODEL` | `en_core_web_sm` | Presidio NLP model. |
 | `PII_SCORE_THRESHOLD` | 0.4 | Presidio entity threshold. |
-| `PII_INPUT_ENTITIES` | Sensitive entity list in `config.py` | Input masking types. |
-| `PII_OUTPUT_ENTITIES` | Sensitive entity list excluding phone | Output masking types. |
+| `PII_INPUT_ENTITIES` | Sensitive entity list in `config/defaults.yaml` | Input masking types. |
+| `PII_OUTPUT_ENTITIES` | Sensitive entity list in `config/defaults.yaml`, excluding phone | Output masking types. |
 
 ### 14.6 Intent and direct LLM retry settings
 
@@ -1146,14 +1194,11 @@ distributed queue; Compose interpolation may override these values.
 | `INTENT_MIN_SCORE` | 0.85 | Minimum cosine score for a classifier label. |
 | `INTENT_MIN_MARGIN` | 0.03 | Required lead over second-best label. |
 | `LLM_MAX_ATTEMPTS` | 4 | Groq wrapper attempt count. |
-| `LLM_MAX_WAIT_S` | 10; Compose default 25 | Maximum cumulative retry sleep per wrapped Groq request. |
+| `LLM_MAX_WAIT_S` | 25 | Maximum cumulative retry sleep per wrapped Groq request. |
 | `LLM_REASONING_EFFORT` | unset | Optional `gpt-oss` reasoning setting. |
-| `FASTEMBED_CACHE_DIR` | No Python default; Docker sets `/home/app/.cache/fastembed` | FastEmbed model cache directory. |
+| `FASTEMBED_CACHE_DIR` | None; Docker sets `/home/app/.cache/fastembed` | FastEmbed model cache directory. |
 | `FASTEMBED_LOCAL_FILES_ONLY` | false | FastEmbed local-only mode when set to `true`. |
 | `HF_HOME` | Docker sets `/home/app/.cache/huggingface` | Hugging Face model/cache location. |
-| `EMBEDDING_TIMEOUT_S` | Not read by current app code; Compose passes 40 | No observed effect in the application source. |
-| `RERANK_TIMEOUT_S` | Not read by current app code; Compose passes 30 | No observed effect in the application source. |
-| `WARMUP_STEP_TIMEOUT_S` | Not read by current app code; Compose passes 300 | No observed effect in the application source. |
 
 The default input PII entity set includes phone, email, payment card, SSN,
 IBAN, IP address, bank number, passport, driver license, Aadhaar, and PAN.
@@ -1167,27 +1212,20 @@ not reproduce secret values from any local or deployment environment file.
 Supply credentials through a secret manager or untracked deployment
 environment; never commit populated secret values.
 
-**Required by Compose:** `GROQ_API_KEY`, `SESSION_HMAC_SECRET`, `QDRANT_URL`,
+**Required by Compose:** `GROQ_API_KEY`, `VOYAGE_API_KEY`, `SESSION_HMAC_SECRET`, `QDRANT_URL`,
 `QDRANT_API_KEY`, `REDIS_PASSWORD`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD`.
 `SESSION_HMAC_SECRET` must be at least 32 bytes and should be high entropy.
 Groq and Qdrant credentials receive basic startup format/placeholder
 validation; this does not prove that the remote service accepts them.
 
-**Optional/defaulted by Compose:** `FALLBACK_GROQ_API_KEY`,
-`SESSION_TTL_SECONDS`, `SESSION_COOKIE_SECURE`,
-`SESSION_COOKIE_SAMESITE`, `CHAT_SESSION_RATE_LIMIT_REQUESTS`,
-`CHAT_IP_RATE_LIMIT_REQUESTS`, `CHAT_RATE_LIMIT_WINDOW_SECONDS`,
-`MAX_CONCURRENT_RAG`, `MAX_QUEUE_WAITERS`,
-`RAG_QUEUE_MAX_WAIT_SECONDS`, `RAG_QUEUE_POLL_INTERVAL_SECONDS`,
-`RAG_QUEUE_RETRY_AFTER_SECONDS`, `RAG_CONCURRENCY_LEASE_SECONDS`,
-`COLLECTION_NAME`, `LOGFIRE_TOKEN`, `REQUEST_TIMEOUT_S`,
-`LLM_MAX_WAIT_S`, `EMBEDDING_TIMEOUT_S`, `RERANK_TIMEOUT_S`,
-`WARMUP_STEP_TIMEOUT_S`, `GUARDRAILS_TIMEOUT_S`, `GUARDRAILS_ENABLED`,
-and `GUARDRAILS_FAIL_OPEN`. Compose also sets
+**Optional/defaulted by Compose:** `FALLBACK_GROQ_API_KEY` and
+`LOGFIRE_TOKEN`. The Compose file passes these optionally and sets
 `TOKENIZERS_PARALLELISM=false`, `OMP_NUM_THREADS=4`, and
 `HF_HUB_DISABLE_TELEMETRY=1` in the API container.
 
-Other supported names include `APP_NAME`, `LLM_MODEL`,
+Other supported names include settings loaded from the shared YAML defaults,
+such as `APP_NAME`, `DATA_DIR`, `TEMP_UPLOAD_DIR`, `QDRANT_STORAGE_PATH`,
+`REQUEST_TIMEOUT_S`, `LLM_MODEL`,
 `GUARDRAIL_LLM_MODEL`, `EMBEDDING_MODEL`, `VECTOR_NAME`, `RERANKER_MODEL`,
 `BM25_MANIFEST_PATH`, `RETRIEVAL_K`, `FINAL_TOP_K`, `RRF_K`,
 `MAX_HISTORY_TURNS`, `MAX_CONTEXT_TOKENS`, `REDIS_URL`, `CACHE_TTL`,
@@ -1206,11 +1244,10 @@ The web build supports `VITE_API_BASE_URL` (empty means same-origin) and
 Vite-prefixed values are bundled into browser code and must never contain
 secrets.
 
-Several settings are read directly with `os.getenv()` rather than declared
-in Pydantic Settings. Compose also passes `EMBEDDING_TIMEOUT_S`,
-`RERANK_TIMEOUT_S`, and `WARMUP_STEP_TIMEOUT_S`, which current source does not
-consume. Treat source-code reads as authoritative: a passed environment
-variable is not necessarily active.
+The deployment environment file contains placeholders only in the tracked
+example. Keep real credentials and deployment-specific values outside the
+repository. Treat source-code reads, the shared YAML defaults, and Compose
+`environment` blocks as authoritative.
 
 ## 15. React web client
 
@@ -1236,64 +1273,40 @@ See [`web/README.md`](../web/README.md) for development and deployment setup.
 These are source-code observations that materially affect the runtime and
 should be considered during maintenance or deployment.
 
-1. **Semantic intent examples are absent from this workspace.** The configured
-   default is `app/data/intent_examples.yml`, but that file is not present in
-   the checked project tree. `get_intent_router()` catches loading failure,
-   logs it, and marks the singleton unavailable for the process. The API then
-   uses the greeting regex where applicable and otherwise the Groq query
-   router. An external deployment may supply the file at runtime.
-2. **`document_inventory` is not a dedicated feature path.** The planner
+1. **`document_inventory` is not a dedicated feature path.** The planner
    accepts that intent, but `run_rag_pipeline_async()` handles only
    out-of-scope, general-chat, summary, and normal RAG branches. Inventory
    intent falls through to the RAG path.
-3. **Cache-hit `source_map` is empty.** The cache stores answer/chunks but not
-   the source map; on hit, `_reply()` is called without one.
-4. **Fast-path smalltalk skips output guardrails.** It checks input PII equality
+2. **Fast-path smalltalk skips output guardrails.** It checks input PII equality
    before skipping full input rails, but its generated response returns
    directly rather than passing through `_guard_free_text()`.
-5. **Disabling guardrails disables masking too.** `check_input()` and
+3. **Disabling guardrails disables masking too.** `check_input()` and
     `check_output()` return immediately when `GUARDRAILS_ENABLED=false`; the
     ordinary query path then does not mask the current input or generated
     answer through these wrappers.
-6. **Logfire instrumentation still needs privacy-aware retention.** The
+4. **Logfire instrumentation still needs privacy-aware retention.** The
     application-authored HTTP and pipeline spans use query hashes rather than
     recording the raw query as a span attribute; configure trace access and
     retention appropriately for the deployment.
-7. **Shutdown does not close singleton clients.** `shutdown_pipeline()` is
+5. **Shutdown does not close singleton clients.** `shutdown_pipeline()` is
     empty.
-8. **Local Qdrant path setting is missing.** When `QDRANT_URL` is unset,
-    `QdrantVectorRetriever` reads `settings.QDRANT_STORAGE_PATH`, but that
-    setting is not declared in `config.py`. The Compose deployment avoids this
-    branch by requiring `QDRANT_URL`; local-only Qdrant startup needs this
-    setting added or a configured remote Qdrant URL.
-9. **Retriever exceptions become empty rankings.** This allows one retrieval
-    backend to continue when the other fails, but if both fail the request may
-    surface as a no-evidence answer rather than a direct retrieval error.
-10. **Qdrant and BM25 consistency is operationally managed.** Remote Qdrant can
+6. **Qdrant and BM25 consistency is operationally managed.** Remote Qdrant can
     be correctly configured while local BM25 manifests are stale or absent.
     The two retrieval backends may then search different corpora.
-11. **BM25 is not refreshed after singleton initialization.** New manifests
+7. **BM25 is not refreshed after singleton initialization.** New manifests
     require process restart or explicit future reload support to appear in the
     existing in-memory index.
-12. **Catalog fingerprint is approximate.** Same document IDs and chunk
+8. **Catalog fingerprint is approximate.** Same document IDs and chunk
     counts with changed content may not change the cache corpus version.
-13. **Cache stores asynchronously.** The response can return before the Redis
+9. **Cache stores asynchronously.** The response can return before the Redis
     write finishes; write errors are logged and do not alter the already sent
     response.
-14. **Numeric grounding is heuristic.** It does not prove all factual claims,
+10. **Numeric grounding is heuristic.** It does not prove all factual claims,
     calculations, or citations; valid figures can be rejected or unsupported
     figures missed depending on numeric overlap and scale.
-15. **Router intent allow-list and output path differ.** `document_inventory`
-    is accepted by `plan_query()` validation but absent from the model’s
-    declared JSON intent list and absent from the pipeline’s special-case
-    branches.
-16. **Response cache does not rebuild source attribution.** On a cache hit,
-    the answer and chunks are reused, but the original `[S#]` source map is
-    not returned. Clients should not assume cached and uncached responses have
-    identical `source_map` values.
-17. **History roles are constrained.** `ChatTurn.role` permits only `user` or
+11. **History roles are constrained.** `ChatTurn.role` permits only `user` or
     `assistant`; unknown request fields are rejected.
-18. **The `health` route is liveness only.** Use `/health/ready` to determine
+12. **The `health` route is liveness only.** Use `/health/ready` to determine
     whether initialized models and required startup resources are available.
 
 ## 17. Error handling and graceful degradation
@@ -1309,10 +1322,11 @@ should be considered during maintenance or deployment.
 | Unexpected request exception | Logfire exception and HTTP 500 with generic detail. |
 | Semantic intent loading/decision fails | Log and continue with regex greeting fallback or LLM router. |
 | Query router LLM fails or returns invalid JSON | Log; return empty routing object and construct a deterministic/default plan. |
-| Catalog refresh fails | Log exception, retain prior catalog copy. |
-| Vector or BM25 call fails | Log; use empty ranking from that backend and allow the other to contribute. |
+| Qdrant call fails | Raise `VectorStoreError`; the chat endpoint returns HTTP 503 rather than silently treating the failure as an empty ranking. |
+| BM25 call fails with a non-Qdrant error | Log; use an empty BM25 ranking and allow Qdrant results to contribute. |
+| Catalog refresh fails with a non-Qdrant error | Log exception and retain the prior catalog copy. Qdrant `VectorStoreError` propagates to the request handler. |
 | Strict retrieval has too few results | Retry without year/company filters but retain document IDs. |
-| FlashRank fails | Log; preserve incoming ranking with fallback score. |
+| Voyage reranking fails or times out | Log; preserve incoming ranking with fallback score. |
 | Cache read/write fails | Log; continue on miss or leave successful response unchanged. |
 | NeMo check errors/times out | With default `GUARDRAILS_FAIL_OPEN=false`, fail closed with a temporary refusal; when true, run deterministic fallback checks. |
 | Output number check fails once | Retry once with stricter answer prompt. |
@@ -1380,12 +1394,17 @@ Example request shape:
 - Main execution graph: [`app/pipeline.py`](../app/pipeline.py)
 - Retrieval, fusion, and context: [`app/services/retrieval.py`](../app/services/retrieval.py)
 - Settings and defaults: [`app/config.py`](../app/config.py)
+- Shared defaults and settings: [`config/defaults.yaml`](../config/defaults.yaml), [`shared/settings.py`](../shared/settings.py)
+- Compose deployment: [`compose.yaml`](../compose.yaml)
+- Container build and dependency lock: [`Dockerfile`](../Dockerfile), [`requirements.in`](../requirements.in), [`requirements.txt`](../requirements.txt)
+- Nginx edge configuration and deployment runbook: [`deploy/nginx/default.conf`](../deploy/nginx/default.conf), [`deploy/README.md`](../deploy/README.md)
+- Secret-name template (placeholders only): [`.env.production.example`](../.env.production.example)
 - LLM query planning and state: [`app/utils/router.py`](../app/utils/router.py)
 - Embedding intent classifier: [`app/utils/intent_router.py`](../app/utils/intent_router.py)
-- Dense Qdrant retrieval: [`app/utils/vector.py`](../app/utils/vector.py)
-- Local lexical BM25 retrieval: [`app/utils/bm25.py`](../app/utils/bm25.py)
+- Dense Qdrant retrieval: [`app/retrieval/qdrant.py`](../app/retrieval/qdrant.py)
+- Local lexical BM25 retrieval: [`app/retrieval/bm25.py`](../app/retrieval/bm25.py)
 - Rank fusion and evidence packing: [`app/services/retrieval.py`](../app/services/retrieval.py)
-- FlashRank reranking: [`app/utils/flashrank_reranker.py`](../app/utils/flashrank_reranker.py)
+- Voyage AI reranking: [`app/retrieval/voyage_reranker.py`](../app/retrieval/voyage_reranker.py)
 - Redis exact/semantic cache: [`app/utils/cache.py`](../app/utils/cache.py)
 - NeMo wrapper and policy checks: [`app/utils/guardrails.py`](../app/utils/guardrails.py)
 - Deterministic security/grounding rules: [`app/utils/guard_rules.py`](../app/utils/guard_rules.py)
@@ -1393,10 +1412,10 @@ Example request shape:
 - NeMo custom actions: [`app/guardrails_config/actions.py`](../app/guardrails_config/actions.py)
 - NeMo flow configuration: [`app/guardrails_config/config.yml`](../app/guardrails_config/config.yml)
 - NeMo refusal flows: [`app/guardrails_config/rails.co`](../app/guardrails_config/rails.co)
-- NeMo input policy prompt: [`app/guardrails_config/prompts.yml`](../app/guardrails_config/prompts.yml)
+- Shared YAML prompts: [`prompts/`](../prompts/)
 - Groq retry/key rotation: [`app/utils/llm.py`](../app/utils/llm.py)
 - Token usage helpers: [`app/utils/tokens.py`](../app/utils/tokens.py)
 - JSON stdout logger: [`app/utils/logger.py`](../app/utils/logger.py)
+- Admin UI and ingestion: [`admin/app.py`](../admin/app.py), [`admin/parse_pdf.py`](../admin/parse_pdf.py), [`admin/seed_qdrant.py`](../admin/seed_qdrant.py)
 - User-facing React client: [`web/src/App.tsx`](../web/src/App.tsx)
 - Frontend setup: [`web/README.md`](../web/README.md)
-- Ingestion-side report: [`Present/ADMIN_INGESTION_REPORT.md`](./ADMIN_INGESTION_REPORT.md)

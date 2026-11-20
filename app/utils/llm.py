@@ -4,10 +4,9 @@ Used by the router, the answer generator and the evaluation judge so a tokens-pe
 limit causes a short wait instead of a failed request.
 
 Env:
-  LLM_MAX_ATTEMPTS        attempts per call                          (default 4)
-  LLM_MAX_WAIT_S          total seconds we may sleep per call        (default 10 - keeps serving under its timeout;
-                                                                      the eval runner raises this to 120)
-  LLM_REASONING_EFFORT    low|medium|high, applied to gpt-oss models only (fewer hidden reasoning tokens = less TPM)
+  LLM_MAX_ATTEMPTS        attempts per call
+  LLM_MAX_WAIT_S          total seconds we may sleep per call
+  LLM_REASONING_EFFORT    low|medium|high, applied to gpt-oss models only
 """
 from __future__ import annotations
 
@@ -78,9 +77,13 @@ def chat_with_retry(client: Any, *, max_total_wait_s: Optional[float] = None, **
     if not clients:
         raise ValueError("At least one Groq client is required")
 
-    max_attempts = int(os.getenv("LLM_MAX_ATTEMPTS", "4"))
-    budget = max_total_wait_s if max_total_wait_s is not None else float(os.getenv("LLM_MAX_WAIT_S", "10"))
-    effort = os.getenv("LLM_REASONING_EFFORT")
+    max_attempts = int(os.getenv("LLM_MAX_ATTEMPTS", str(settings.LLM_MAX_ATTEMPTS)))
+    budget = (
+        max_total_wait_s
+        if max_total_wait_s is not None
+        else float(os.getenv("LLM_MAX_WAIT_S", str(settings.LLM_MAX_WAIT_S)))
+    )
+    effort = os.getenv("LLM_REASONING_EFFORT", settings.LLM_REASONING_EFFORT)
     if effort and "gpt-oss" in str(kwargs.get("model", "")) and "reasoning_effort" not in kwargs:
         kwargs["reasoning_effort"] = effort
 

@@ -43,7 +43,7 @@ three important design characteristics:
    Deterministic company/year logic supplements the model's output.
 2. **Evidence is found and selected by multiple stages.** Dense Qdrant
    retrieval and local BM25 lexical retrieval run concurrently. Reciprocal
-   Rank Fusion (RRF) combines results. FlashRank reranks them, with an
+   Rank Fusion (RRF) combines results. Voyage AI reranks them, with an
    entity-balanced strategy for cross-company questions. A token-limited
    context builder adds source tags and citation metadata.
 3. **Answers are constrained and verified.** Input PII masking and policy
@@ -74,7 +74,7 @@ flowchart TD
     CACHE -->|miss| FILTER[Catalog resolution<br/>document/company/year filters]
     FILTER --> SEARCH[Parallel dense and BM25 search]
     SEARCH --> FUSE[Entity-balanced RRF fusion]
-    FUSE --> RERANK[FlashRank reranking]
+    FUSE --> RERANK[Voyage AI reranking]
     RERANK --> CONTEXT[Token-budgeted evidence context<br/>with [S1] citations]
     CONTEXT --> GEN[Groq answer generation]
     GEN --> CHECK[Output rails<br/>numeric grounding, prompt leak, PII]
@@ -160,7 +160,7 @@ the actual retrieved text.
 [`pipeline.py`](../app/pipeline.py) is the main orchestration module. Retrieval
 components and evidence preparation are implemented in
 [`services/retrieval.py`](../app/services/retrieval.py), which owns the
-lazy-initialized, process-local Qdrant, BM25, and FlashRank instances.
+lazy-initialized, process-local Qdrant, BM25, and Voyage client instances.
 Initialization is guarded by a thread lock.
 Blocking work (model calls, vector search, cache operations) is moved off the
 async event loop using `asyncio.to_thread`; independent retrievals are awaited
@@ -347,9 +347,9 @@ directory used by BM25.
 
 ### Stage 8 — Reranking and evidence packing
 
-`FlashRankReranker.rerank_balanced()` reranks candidate groups per entity for
+`VoyageReranker.rerank_balanced()` reranks candidate groups per entity for
 multi-company comparisons and interleaves the best results round-robin. For a
-single entity it behaves like ordinary reranking. If FlashRank errors, the
+single entity it behaves like ordinary reranking. If Voyage errors, the
 reranker logs the failure and returns the initial candidate order with a
 fallback score.
 
@@ -434,7 +434,7 @@ This module owns the retrieval service instances and retrieval-related helpers:
 This separation lets user language (including pronouns and conversational
 follow-ups) be converted into explicit search targets and constraints.
 
-### `app/utils/vector.py` — dense Qdrant search
+### `app/retrieval/qdrant.py` — dense Qdrant search
 
 - `QdrantVectorRetriever.__init__()` initializes the BGE-small embedding model
   and chooses remote Qdrant when `QDRANT_URL` is set. Its code also attempts a
@@ -448,7 +448,7 @@ follow-ups) be converted into explicit search targets and constraints.
   collection indexes are checked during startup warmup to avoid charging this
   one-time setup to a chat request.
 
-### `app/utils/bm25.py` — local lexical search
+### `app/retrieval/bm25.py` — local lexical search
 
 - `load_index()` reads local manifest JSON and builds an in-memory BM25 index.
 - `searchable_text()` enriches chunk text with company, year, metric, headings,
@@ -459,10 +459,10 @@ follow-ups) be converted into explicit search targets and constraints.
 BM25 is complementary to dense retrieval: it can strongly match exact numeric,
 metric, and filing terminology that semantic similarity alone may rank lower.
 
-### `app/utils/flashrank_reranker.py` — candidate relevance and fairness
+### `app/retrieval/voyage_reranker.py` — candidate relevance and fairness
 
 - `rerank()` enriches each passage with company/source/section and financial
-  table metadata before scoring.
+  table metadata before sending it to Voyage AI for scoring.
 - `rerank_balanced()` reranks per entity and interleaves results to retain
   coverage in cross-company questions.
 - A reranker failure falls back to the initial ranking; it does not discard all
@@ -486,7 +486,7 @@ metric, and filing terminology that semantic similarity alone may rank lower.
   numeric-grounding calculations.
 - `pii.py` uses Presidio when available and falls back to targeted regexes for
   common sensitive patterns/secrets.
-- `guardrails_config/config.yml`, `prompts.yml`, `rails.co`, and
+- `guardrails_config/config.yml`, `prompts/guardrails.yaml`, `rails.co`, and
   `guardrails_config/actions.py` define policy flows and custom actions.
 
 The numeric check is a guardrail, not a formal proof of semantic correctness:
@@ -519,6 +519,7 @@ can override defaults. Important settings include:
 | Area | Settings / defaults | Effect |
 | --- | --- | --- |
 | LLM | `GROQ_API_KEY` (required), optional `FALLBACK_GROQ_API_KEY`, `LLM_MODEL=openai/gpt-oss-20b` | Routing and answer generation. |
+| Reranking | `VOYAGE_API_KEY` (required by Compose), `RERANKER_MODEL=rerank-3-lite` | Voyage API candidate reranking; query and retrieved passages are sent to Voyage AI. |
 | Vector search | `EMBEDDING_MODEL=BAAI/bge-small-en-v1.5`, `VECTOR_NAME=fastembed-BAAI-bge-small-en-v1-5`, `COLLECTION_NAME=financial_rag_analytics` | The vector name and collection must match the ingestion seeder. |
 | Qdrant | Compose requires `QDRANT_URL` and `QDRANT_API_KEY`; the admin UI additionally requires an HTTPS URL. | The deployed Compose path uses Qdrant Cloud only. The API code has a local fallback branch, but its storage setting is undefined. |
 | Retrieval | `RETRIEVAL_K=30`, `RRF_K=60`, `FINAL_TOP_K=5`, pipeline candidate defaults are environment-driven | Search depth and rank fusion. |
@@ -542,7 +543,7 @@ include both settings-based and direct environment configuration.
 - **Qdrant:** dense vector collection and document catalog.
 - **FastEmbed / BGE-small:** query and cache embeddings.
 - **BM25 / rank-bm25:** local lexical index built from manifest chunks.
-- **FlashRank:** candidate reranking.
+- **Voyage AI:** hosted candidate reranking.
 - **Redis / RedisVL:** exact and semantic answer cache.
 - **NeMo Guardrails / LangChain Groq:** policy rails.
 - **Presidio / spaCy:** PII recognition, with regex fallback.
@@ -559,7 +560,7 @@ ChatRequest
   -> document filters
   -> Qdrant dense results + local BM25 results
   -> RRF candidate list (entity-aware)
-  -> FlashRank final chunks (entity-balanced)
+  -> Voyage AI final chunks (entity-balanced)
   -> token-limited context + citation source map
   -> Groq answer
   -> output guardrails / optional strict retry
@@ -577,7 +578,7 @@ ChatRequest
 | Query router LLM fails | Returns an empty routing object; deterministic/default planning continues. |
 | BM25 retriever fails | `_safe_call()` logs the failure and supplies an empty ranking; Qdrant failures are propagated and returned as HTTP 503 rather than misreported as empty results. |
 | Strict metadata retrieval yields too few results | Retries without year/company constraints while preserving document IDs. |
-| FlashRank fails | Returns initial candidate order with fallback scores. |
+| Voyage API fails or times out | Returns initial candidate order with fallback scores. |
 | Cache read/write fails | Logs the failure; request continues without a cache hit/store. |
 | Primary NeMo provider fails or times out | Try the distinct configured fallback Groq key; if both fail, the default is fail-closed with a temporary refusal. Deterministic fallback remains opt-in. |
 | Numeric output check blocks | One stricter generation retry; if still blocked, return a verification refusal and do not cache. |
@@ -622,7 +623,7 @@ ChatRequest
 > query planner resolves companies, years, metrics, and conversational
 > follow-ups. For financial questions, the system runs vector search in Qdrant
 > and lexical BM25 search in parallel. It fuses those results, reranks them
-> with FlashRank while preserving company balance for comparisons, and packs
+> with Voyage AI while preserving company balance for comparisons, and packs
 > the best evidence into a source-tagged context. Groq generates the answer
 > from that context, and output rails check for sensitive data, prompt leakage,
 > and unsupported numbers before the response returns with source chunks and
@@ -647,11 +648,11 @@ ChatRequest
 | --- | --- | --- |
 | Chat frontend | `web/` | React 19 + TypeScript + Vite. Sends same-origin requests to `/health/ready` and `/v1/chat`, includes cookie credentials, and renders answers and retrieved source passages. Conversation state is held in browser memory and is lost on reload. |
 | API | `app/main.py`, `app/pipeline.py` | FastAPI entry point, signed browser sessions, request limits, distributed RAG admission, retrieval/generation orchestration, and response construction. |
-| Retrieval and safety | `app/services/`, `app/utils/`, `app/guardrails_config/` | Qdrant dense search, local BM25, RRF, FlashRank, Redis cache, query routing, PII handling, NeMo Guardrails, model retries, and logging. |
+| Retrieval and safety | `app/services/`, `app/utils/`, `app/guardrails_config/` | Qdrant dense search, local BM25, RRF, Voyage AI reranking, Redis cache, query routing, PII handling, NeMo Guardrails, model retries, and logging. |
 | Admin / ingestion UI | `admin/app.py` | Streamlit UI protected by Nginx Basic Auth and a separate in-app login. It accepts PDFs or existing JSON manifests and is configured for Qdrant Cloud only. |
 | PDF processing | `admin/parse_pdf.py` | Docling conversion, text/table extraction, financial chunk construction, quality reporting, and manifest/document persistence. |
 | Qdrant seeding | `admin/seed_qdrant.py` | Validates manifest chunks, generates 384-dimensional BGE-small vectors, creates the collection/indexes, and upserts Qdrant points. The active UI requires Cloud credentials; the CLI/seeder code still contains a local-storage fallback. |
-| Source corpus | `data/raw/`, `data/manifests/` | The current workspace has three source filing PDFs and four manifests, including two Duolingo filings and Nike filings. Manifests support both Cloud indexing and the API's local BM25 index. |
+| Source corpus | `data/raw/`, `data/manifests/` | The current workspace has source filing PDFs and manifests. Required manifests stay at the manifest directory root; parser Markdown and auxiliary JSON are written under its configured metadata subdirectory. Manifests support both Cloud indexing and the API's local BM25 index. |
 | Deployment | `compose.yaml`, `Dockerfile`, `deploy/` | Multi-stage web/Python/Nginx build, Redis Stack, API, Streamlit admin, TLS termination, Basic Auth, private Docker networks, persistent model/cache/upload volumes, health checks, and resource limits. |
 | Qdrant migration | `scripts/migrate_qdrant_to_cloud.py` | Copies points from a local Qdrant collection to Cloud in retryable batches and renames the old slash-containing vector name while preserving point IDs, vectors, and payloads. |
 | Evaluation | `evaluation/` | RAGAS pipeline, a 25-sample cached input file, and saved evaluation output. It is not part of the production container or base dependency manifest. |
@@ -664,20 +665,20 @@ ChatRequest
 
 The admin app has two paths:
 
-1. **PDF path:** upload to Streamlit, persist the upload under
-   `/app/data/temp_uploads`, parse via Docling, write JSON/Markdown/quality
-   outputs under `/app/data/manifests`, then index the manifest.
+1. **PDF path:** upload to Streamlit, persist the upload under the configured
+   temporary-upload directory, parse via Docling, write the required manifest
+   at the configured manifest directory root and Markdown/quality/Docling
+   artifacts under its configured metadata subdirectory, then index the manifest.
 2. **Manifest path:** upload JSON, validate the chunk list, preview chunk
    types, normalize the target document ID, persist the rewritten manifest,
    then index it.
 
-The active parser's `run_pipeline()` currently unpacks the
-`process_pdf()` result as `(chunks, markdown_text)` and returns `(chunks,
-manifest_path)`, matching the UI call site. The separate
-[`ADMIN_INGESTION_REPORT.md`](./ADMIN_INGESTION_REPORT.md) still describes an
-older return-value mismatch that is not present in the current parser source.
-PDF parsing was not executed as part of this review, so this is a source-level
-contract check, not an end-to-end Docling verification.
+The active parser's `run_pipeline()` unpacks the `process_pdf()` result as
+`(chunks, markdown_text)` and returns `(chunks, manifest_path)`, matching the
+UI call site. Its auxiliary files are stored under the shared
+`MANIFEST_METADATA_SUBDIR`, separate from files discovered by the seeder and
+BM25. PDF parsing was not executed as part of this review, so this is a
+source-level contract check, not an end-to-end Docling verification.
 
 The seeder uses BGE-small to create 384-dimensional cosine vectors with the
 named vector `fastembed-BAAI-bge-small-en-v1-5`. It stores searchable chunk
@@ -859,10 +860,10 @@ browser rendering still require end-to-end verification.
 - Retrieval/fusion/context: [`app/services/retrieval.py`](../app/services/retrieval.py)
 - Runtime settings: [`app/config.py`](../app/config.py)
 - Query routing/state: [`app/utils/router.py`](../app/utils/router.py)
-- Dense retrieval: [`app/utils/vector.py`](../app/utils/vector.py)
-- Lexical retrieval: [`app/utils/bm25.py`](../app/utils/bm25.py)
+- Dense retrieval: [`app/retrieval/qdrant.py`](../app/retrieval/qdrant.py)
+- Lexical retrieval: [`app/retrieval/bm25.py`](../app/retrieval/bm25.py)
 - Answer generation: [`app/pipeline.py`](../app/pipeline.py)
-- Reranking: [`app/utils/flashrank_reranker.py`](../app/utils/flashrank_reranker.py)
+- Reranking: [`app/retrieval/voyage_reranker.py`](../app/retrieval/voyage_reranker.py)
 - Exact/semantic cache: [`app/utils/cache.py`](../app/utils/cache.py)
 - Guardrails: [`app/utils/guardrails.py`](../app/utils/guardrails.py),
   [`app/utils/guard_rules.py`](../app/utils/guard_rules.py),

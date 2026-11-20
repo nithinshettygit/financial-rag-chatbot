@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +20,7 @@ import yaml
 from app.config import settings
 from app.utils import guard_rules as rules
 from app.utils.tokens import count_tokens
+from shared.prompts import load_prompt, load_prompt_file
 
 _REFUSAL = "I can only help with questions about the indexed financial filings, and I can't help with that request."
 REFUSAL_SCOPE = (
@@ -50,22 +50,38 @@ class GuardResult:
     llm_calls: int = 0
 
 
-@lru_cache(maxsize=1)
 def _self_check_input_prompt() -> str:
-    prompt_path = Path(settings.GUARDRAILS_PATH) / "prompts.yml"
-    with prompt_path.open(encoding="utf-8") as prompt_file:
-        prompts = yaml.safe_load(prompt_file)
-    for prompt in prompts.get("prompts", []):
-        if prompt.get("task") == "self_check_input":
-            return str(prompt.get("content", ""))
-    raise ValueError(f"No self_check_input prompt found in {prompt_path}")
+    return load_prompt("guardrails.yaml", "self_check_input")
+
+
+def _load_rails_config():
+    from nemoguardrails import RailsConfig
+
+    guardrails_path = Path(settings.GUARDRAILS_PATH)
+    with (guardrails_path / "config.yml").open(encoding="utf-8") as config_file:
+        config = yaml.safe_load(config_file)
+    if not isinstance(config, dict):
+        raise ValueError(f"Expected a YAML mapping in {guardrails_path / 'config.yml'}")
+
+    prompt_definitions = load_prompt_file("guardrails.yaml").get("prompts")
+    if not isinstance(prompt_definitions, list):
+        raise ValueError("Expected a prompts list in the shared guardrails prompt file")
+    config["prompts"] = prompt_definitions
+    config["config_path"] = str(guardrails_path)
+    colang_content = "\n\n".join(
+        colang_file.read_text(encoding="utf-8")
+        for colang_file in sorted(guardrails_path.rglob("*.co"))
+    )
+    rails_config = RailsConfig.from_content(config=config, colang_content=colang_content)
+    rails_config.config_path = str(guardrails_path.resolve())
+    return rails_config
 
 
 def _build_rails(api_key: str | None = None):
     from langchain_groq import ChatGroq
-    from nemoguardrails import LLMRails, RailsConfig
+    from nemoguardrails import LLMRails
 
-    config = RailsConfig.from_path(settings.GUARDRAILS_PATH)
+    config = _load_rails_config()
     llm = ChatGroq(
         model=settings.GUARDRAIL_LLM_MODEL,
         api_key=api_key or settings.GROQ_API_KEY,

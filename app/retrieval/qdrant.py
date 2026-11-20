@@ -1,4 +1,5 @@
-import os
+"""Qdrant-backed dense vector retrieval."""
+
 import threading
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -16,8 +17,8 @@ class QdrantVectorRetriever:
     def __init__(self):
         self.embedding_model = TextEmbedding(
             model_name=settings.EMBEDDING_MODEL,
-            cache_dir=os.getenv("FASTEMBED_CACHE_DIR"),
-            local_files_only=os.getenv("FASTEMBED_LOCAL_FILES_ONLY", "false").lower() == "true",
+            cache_dir=settings.FASTEMBED_CACHE_DIR,
+            local_files_only=settings.FASTEMBED_LOCAL_FILES_ONLY,
         )
         
         if getattr(settings, "QDRANT_URL", None):

@@ -1,3 +1,5 @@
+"""Local BM25 retrieval index."""
+
 import json
 import re
 from pathlib import Path
@@ -49,7 +51,7 @@ def searchable_text(chunk: Dict[str, Any]) -> str:
 
 
 class BM25Retriever:
-    def __init__(self, data_dir: str = getattr(settings, "DATA_DIR", "data")):
+    def __init__(self, data_dir: str = settings.DATA_DIR):
         self.data_dir = data_dir
         self.valid_chunks: List[Dict[str, Any]] = []
         self.bm25: Optional[BM25Okapi] = None
@@ -61,18 +63,17 @@ class BM25Retriever:
     def load_index(self) -> None:
         data_path = Path(self.data_dir)
         manifest_files = []
-        if data_path.exists():
-            # Check manifests directory first, or all json manifests
-            m_dir = data_path / "manifests"
-            if m_dir.exists():
-                manifest_files = list(m_dir.glob("*.json"))
-            if not manifest_files:
-                manifest_files = list(data_path.rglob("*.json"))
+        manifest_dir = Path(settings.BM25_MANIFEST_PATH)
+        if manifest_dir.exists():
+            manifest_files = list(manifest_dir.glob("*.json"))
 
-        fallback = getattr(settings, "BM25_MANIFEST_PATH", "")
-        if not manifest_files and fallback and Path(fallback).exists():
-            f_path = Path(fallback)
-            manifest_files = list(f_path.glob("*.json")) if f_path.is_dir() else [f_path]
+        if not manifest_files and data_path.exists():
+            manifest_files = [
+                path
+                for path in data_path.rglob("*.json")
+                if settings.MANIFEST_METADATA_SUBDIR
+                not in path.relative_to(data_path).parts[:-1]
+            ]
 
         chunks: List[Dict[str, Any]] = []
         for manifest_file in manifest_files:

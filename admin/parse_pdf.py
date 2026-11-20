@@ -11,7 +11,7 @@ What changed vs. the previous version
 3. Nothing is silently truncated. Every embedding_text is packed to the token
    budget; anything bigger is split (loss-free), never cut.
 4. Automatic OCR fallback for scanned pages (born-digital PDFs stay fast).
-5. Quality report + lossless Docling JSON saved next to the manifest.
+5. Quality report + lossless Docling JSON saved under the metadata subfolder.
 
 Public API (unchanged): DocumentChunk, FastDoclingChunker.process_pdf,
 run_pipeline, and the CLI. Manifest schema is backward compatible; new
@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from annotated_types import doc
 
 import logfire
+from shared.settings import general_settings
 from transformers import AutoTokenizer
 from docling.chunking import HybridChunker
 from docling.datamodel.base_models import InputFormat
@@ -44,12 +45,12 @@ from docling.datamodel.pipeline_options import (
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+EMBEDDING_MODEL = general_settings.EMBEDDING_MODEL
 # BGE-small ceiling is 512 tokens; 500 leaves room for [CLS]/[SEP] + safety.
-MAX_EMBEDDING_TOKENS = 500
-MIN_TEXT_CHARS = 35  # below this (or MIN_TEXT_WORDS) a chunk is a 'fragment' -> merged, not dropped
-MIN_TEXT_WORDS = 6
-OCR_FALLBACK_MISSING_PAGE_RATIO = 0.20
+MAX_EMBEDDING_TOKENS = general_settings.MAX_EMBEDDING_TOKENS
+MIN_TEXT_CHARS = general_settings.MIN_TEXT_CHARS
+MIN_TEXT_WORDS = general_settings.MIN_TEXT_WORDS
+OCR_FALLBACK_MISSING_PAGE_RATIO = general_settings.OCR_FALLBACK_MISSING_PAGE_RATIO
 
 _YEAR_RE = re.compile(r"\b(19|20|21)\d{2}\b")
 # numbers, (negatives), percents, currency, and dash placeholders
@@ -850,7 +851,7 @@ class FastDoclingChunker:
 def run_pipeline(
     pdf_path: Union[str, Path],
     doc_id: str,
-    out_dir: Union[str, Path] = Path("data"),
+    out_dir: Union[str, Path] = Path(general_settings.BM25_MANIFEST_PATH),
     device: str = "auto",
     ocr_mode: str = "auto",
 ) -> Tuple[List[DocumentChunk], Path]:
@@ -861,17 +862,20 @@ def run_pipeline(
     chunker = FastDoclingChunker(doc_title=doc_id, device=device, ocr_mode=ocr_mode)
     chunks, markdown_text = chunker.process_pdf(pdf_path, doc_id)
 
-    (out_dir / f"{doc_id}_document.md").write_text(markdown_text, encoding="utf-8")
+    metadata_dir = out_dir / general_settings.MANIFEST_METADATA_SUBDIR
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+
+    (metadata_dir / f"{doc_id}_document.md").write_text(markdown_text, encoding="utf-8")
     manifest_path = out_dir / f"{doc_id}_manifest.json"
     manifest_path.write_text(
         json.dumps([asdict(c) for c in chunks], indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    (out_dir / f"{doc_id}_quality.json").write_text(
+    (metadata_dir / f"{doc_id}_quality.json").write_text(
         json.dumps(chunker.last_report, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     try:  # lossless Docling doc: re-chunk later without re-parsing the PDF
-        chunker.last_doc.save_as_json(out_dir / f"{doc_id}_docling.json")
+        chunker.last_doc.save_as_json(metadata_dir / f"{doc_id}_docling.json")
     except Exception as exc:
         logfire.warn("docling_json_save_failed {err}", err=str(exc))
     return chunks, manifest_path
@@ -881,7 +885,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process PDF using the Docling structured chunker")
     parser.add_argument("--pdf", required=True, help="Path to input PDF file")
     parser.add_argument("--doc-id", required=True, help="Document ID name")
-    parser.add_argument("--out-dir", default="data", help="Output directory")
+    parser.add_argument(
+        "--out-dir",
+        default=general_settings.BM25_MANIFEST_PATH,
+        help="Output directory (defaults to BM25_MANIFEST_PATH)",
+    )
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
     parser.add_argument("--ocr", default="auto", choices=["auto", "on", "off"])
 

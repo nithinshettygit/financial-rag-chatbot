@@ -7,7 +7,7 @@ rails:
     flows:
       - mask pii input            # deterministic, runs first (also protects the router LLM)
       - check input heuristics    # deterministic prompt-injection / length checks
-      - self check input          # NeMo built-in, LLM policy check (prompt in prompts.yml)
+      - self check input          # NeMo built-in, LLM policy check (prompt in prompts/guardrails.yaml)
   output:
     flows:
       - check prompt leak         # deterministic

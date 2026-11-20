@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -9,24 +8,24 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import logfire
 
 from app.config import settings
-from app.utils.bm25 import BM25Retriever
-from app.utils.flashrank_reranker import FlashRankReranker
+from app.retrieval.bm25 import BM25Retriever
+from app.retrieval.voyage_reranker import VoyageReranker
 from app.utils.router import QueryFilters, SubQuery, company_key
 from app.utils.tokens import count_tokens
-from app.utils.vector import QdrantVectorRetriever, VectorStoreError
+from app.retrieval.qdrant import QdrantVectorRetriever, VectorStoreError
 
 
-RERANK_CANDIDATES = int(os.getenv("RERANK_CANDIDATES", "30"))
-FINAL_TOP_K = int(os.getenv("FINAL_TOP_K", "5"))
-MAX_FINAL_TOP_K = int(os.getenv("MAX_FINAL_TOP_K", "10"))
-MIN_STRICT_YIELD = int(os.getenv("MIN_STRICT_YIELD", "5"))
-CATALOG_TTL_S = int(os.getenv("CATALOG_TTL_S", "300"))
-MAX_CONCURRENT_SEARCHES = int(os.getenv("MAX_CONCURRENT_SEARCHES", "8"))
+RERANK_CANDIDATES = settings.RERANK_CANDIDATES
+FINAL_TOP_K = settings.FINAL_TOP_K
+MAX_FINAL_TOP_K = settings.MAX_FINAL_TOP_K
+MIN_STRICT_YIELD = settings.MIN_STRICT_YIELD
+CATALOG_TTL_S = settings.CATALOG_TTL_S
+MAX_CONCURRENT_SEARCHES = settings.MAX_CONCURRENT_SEARCHES
 
 _init_lock = threading.Lock()
 _vector: Optional[QdrantVectorRetriever] = None
 _bm25: Optional[BM25Retriever] = None
-_reranker: Optional[FlashRankReranker] = None
+_reranker: Optional[VoyageReranker] = None
 _search_sem: Optional[asyncio.Semaphore] = None
 _catalog: Dict[str, Any] = {"ts": 0.0, "docs": []}
 
@@ -47,11 +46,11 @@ def get_bm25() -> BM25Retriever:
     return _bm25
 
 
-def _get_reranker() -> FlashRankReranker:
+def _get_reranker() -> VoyageReranker:
     global _reranker
     with _init_lock:
         if _reranker is None:
-            _reranker = FlashRankReranker()
+            _reranker = VoyageReranker()
     return _reranker
 
 
